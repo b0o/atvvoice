@@ -144,6 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gain = cli.gain;
     let node_name = cli.node_name;
     let node_description = cli.node_description;
+    #[cfg(feature = "dbus")]
     let pw_node_name = node_name.clone();
     std::thread::spawn(move || {
         if let Err(e) = pw::run_pw_source(pcm_rx, gain, &node_name, &node_description) {
@@ -196,10 +197,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run ATVV session with reconnection loop
     loop {
+        let ble_device = ble::BluerDevice { device: &device, chars: &chars };
         tokio::select! {
             result = atvv::run_session(
-                &device,
-                &chars,
+                &ble_device,
                 frame_tx.clone(),
                 cli.mode,
                 &timeouts,

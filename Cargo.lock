@@ -224,6 +224,7 @@ dependencies = [
  "futures",
  "pipewire",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
  "zbus",
