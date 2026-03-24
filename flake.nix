@@ -1,5 +1,5 @@
 {
-  description = "Google ATV Voice over BLE daemon for Linux/PipeWire";
+  description = "Android TV Voice over BLE (ATVV) daemon for Linux/PipeWire";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";

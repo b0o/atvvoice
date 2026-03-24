@@ -2,7 +2,7 @@
 name = "atvvoice"
 version = "0.1.0"
 edition = "2021"
-description = "Google ATV Voice over BLE daemon for Linux/PipeWire"
+description = "Android TV Voice over BLE (ATVV) daemon for Linux/PipeWire"
 license = "MIT"
 
 [features]
