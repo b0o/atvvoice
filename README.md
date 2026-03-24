@@ -155,13 +155,13 @@ busctl --user monitor org.atvvoice
 
 | Properties | Type | Description |
 |------------|------|-------------|
-| `State` | `s` | `"ready"`, `"opening"`, `"streaming"` |
+| `State` | `s` | `"init"`, `"ready"`, `"opening"`, `"streaming"` |
 | `DeviceAddress` | `s` | BT address of connected remote |
 | `NodeName` | `s` | PipeWire node name |
 
 | Signals | Args | Description |
 |---------|------|-------------|
-| `MicStateChanged` | `s` | Emitted on state transitions |
+| `MicStateChanged` | `s` | Emitted on state transitions (new state value) |
 
 To build without D-Bus support entirely: `cargo build --no-default-features`
 

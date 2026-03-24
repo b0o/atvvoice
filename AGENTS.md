@@ -12,22 +12,23 @@ Target remotes: G20S Pro, UR02, and any ATVV-compatible remote following the Goo
 BLE Remote <--[BlueZ/D-Bus/GATT]--> atvvoice daemon --[PipeWire virtual source]--> Apps
 ```
 
-Five modules:
+Six modules:
 
 | Module | File | Responsibility |
 |--------|------|---------------|
-| BLE Discovery | `src/ble.rs` | Find ATVV devices, resolve GATT characteristics |
+| BLE Discovery | `src/ble.rs` | Find ATVV devices, resolve GATT characteristics, AcquireNotify |
 | ATVV Protocol | `src/atvv.rs` | Protocol state machine, commands, frame dispatch |
 | ADPCM Decoder | `src/adpcm.rs` | Pure IMA/DVI ADPCM frame decoder + post-processing |
 | PipeWire Source | `src/pw.rs` | Virtual audio source node (own thread, not async) |
+| D-Bus Control | `src/dbus.rs` | Session bus interface for external mic control (optional feature) |
 | CLI / Main | `src/main.rs` | CLI parsing, tokio runtime, reconnect loop, signal handling |
 
 ## Tech Stack
 
 - **Language:** Rust (2021 edition)
-- **Async runtime:** tokio (single-threaded, `current_thread`)
+- **Async runtime:** tokio (multi-threaded)
 - **BLE:** `bluer` 0.17 (async BlueZ D-Bus bindings, feature `bluetoothd`)
-- **Audio:** `pipewire` 0.8 (`pipewire-rs` bindings)
+- **Audio:** `pipewire` 0.9 (`pipewire-rs` bindings)
 - **CLI:** `clap` 4 (derive)
 - **Logging:** `tracing` + `tracing-subscriber` (env-filter)
 - **Async utilities:** `futures` 0.3
