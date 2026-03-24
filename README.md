@@ -84,6 +84,19 @@ atvvoice -d <BT_ADDRESS> [OPTIONS]
 
 \*Not all remotes support hold-to-stream. The G20S Pro sends a button press event on both press and release, so it only works in toggle mode.
 
+Without `-d`, atvvoice scans bonded devices for the ATVV service UUID and connects to the first match. Use `-d` to target a specific remote by address.
+
+### Multiple remotes
+
+Each instance handles one remote. To use multiple remotes, run separate instances with `-d` for each:
+
+```
+atvvoice -d AA:BB:CC:DD:EE:FF &
+atvvoice -d 11:22:33:44:55:66 &
+```
+
+Each will appear as a separate PipeWire source. Note that the D-Bus bus name (`org.atvvoice`) and PipeWire node name (`atvvoice`) are currently shared — additional instances will start without D-Bus control and may have naming collisions. Per-device bus names and node names may be added in the future. If you need multi-remote support, please open an issue describing your setup.
+
 Example:
 
 ```
@@ -107,6 +120,39 @@ services.atvvoice = {
   verbose = 1;               # 0-3
 };
 ```
+
+## D-Bus control interface
+
+When built with the `dbus` feature (enabled by default), atvvoice exposes `org.atvvoice.Daemon` on the session bus.
+
+```
+# Toggle mic on/off
+busctl --user call org.atvvoice /org/atvvoice/Daemon org.atvvoice.Daemon MicToggle
+
+# Query state
+busctl --user get-property org.atvvoice /org/atvvoice/Daemon org.atvvoice.Daemon State
+
+# Monitor state changes
+busctl --user monitor org.atvvoice
+```
+
+| Methods | Description |
+|---------|-------------|
+| `MicOpen` | Start streaming |
+| `MicClose` | Stop streaming |
+| `MicToggle` | Toggle based on current state |
+
+| Properties | Type | Description |
+|------------|------|-------------|
+| `State` | `s` | `"ready"`, `"opening"`, `"streaming"` |
+| `DeviceAddress` | `s` | BT address of connected remote |
+| `NodeName` | `s` | PipeWire node name (`"atvvoice"`) |
+
+| Signals | Args | Description |
+|---------|------|-------------|
+| `MicStateChanged` | `s` | Emitted on state transitions |
+
+To build without D-Bus: `cargo build --no-default-features`
 
 ## How it works
 

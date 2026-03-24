@@ -1,6 +1,8 @@
 pub mod adpcm;
 pub mod atvv;
 pub mod ble;
+#[cfg(feature = "dbus")]
+pub mod dbus;
 pub mod pw;
 
 use clap::Parser;
@@ -31,6 +33,11 @@ struct Cli {
     /// Close mic after N seconds since last button press (user inactive). 0 = disabled.
     #[arg(short = 't', long, default_value = "0")]
     idle_timeout: u64,
+
+    /// Disable D-Bus control interface
+    #[cfg(feature = "dbus")]
+    #[arg(long)]
+    no_dbus: bool,
 
     /// Increase log verbosity (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
@@ -67,6 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Find ATVV device
     let device = ble::find_atvv_device(&adapter, filter_addr).await?;
+    #[cfg(feature = "dbus")]
+    let device_addr = device.address().to_string();
 
     // Ensure connected
     if !device.is_connected().await? {
@@ -105,9 +114,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // State watch channel: atvv -> D-Bus (if enabled).
+    let (state_tx, _state_rx) = tokio::sync::watch::channel(atvv::State::Init);
+
+    // Set up D-Bus control interface (if feature and CLI allow).
+    #[cfg(feature = "dbus")]
+    let (mut dbus_cmd_rx, _dbus_conn) = if !cli.no_dbus {
+        let info = dbus::DaemonInfo {
+            device_address: device_addr,
+            node_name: "atvvoice".to_string(),
+        };
+        match dbus::serve(_state_rx, info).await {
+            Ok((cmd_rx, conn)) => (Some(cmd_rx), Some(conn)),
+            Err(e) => {
+                tracing::warn!("Failed to register D-Bus interface: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     // Set up signal handling for graceful shutdown.
-    // IMPORTANT: tokio::signal::ctrl_c() is consumed after first await.
-    // Create it OUTSIDE the reconnection loop.
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
@@ -119,7 +147,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run ATVV session with reconnection loop
     loop {
         tokio::select! {
-            result = atvv::run_session(&chars, frame_tx.clone(), cli.mode, &timeouts) => {
+            result = atvv::run_session(
+                &chars,
+                frame_tx.clone(),
+                cli.mode,
+                &timeouts,
+                {
+                    #[cfg(feature = "dbus")]
+                    { dbus_cmd_rx.as_mut() }
+                    #[cfg(not(feature = "dbus"))]
+                    { None }
+                },
+                Some(&state_tx),
+            ) => {
                 match result {
                     Ok(()) => tracing::info!("Session ended cleanly"),
                     Err(e) => tracing::warn!("Session error: {}", e),

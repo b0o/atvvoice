@@ -35,6 +35,14 @@ pub enum State {
     Streaming,
 }
 
+/// Commands that can be sent from external sources (D-Bus, CLI, etc.).
+#[derive(Debug, Clone, Copy)]
+pub enum ExternalCommand {
+    MicOpen,
+    MicClose,
+    MicToggle,
+}
+
 /// Session timeout configuration.
 pub struct SessionTimeouts {
     /// Auto-close mic if no frames arrive for this long (device went to sleep).
@@ -47,15 +55,27 @@ pub struct SessionTimeouts {
 
 /// Run the ATVV protocol session.
 /// Audio frames are sent to `audio_tx`.
+/// External commands (e.g. from D-Bus) are received on `command_rx`.
+/// State changes are broadcast via `state_tx` (for D-Bus signals, etc.).
 /// Returns on device disconnect or unrecoverable error.
 pub async fn run_session(
     chars: &AtvvChars,
     audio_tx: mpsc::Sender<Vec<u8>>,
     mic_mode: MicMode,
     timeouts: &SessionTimeouts,
+    mut command_rx: Option<&mut mpsc::Receiver<ExternalCommand>>,
+    state_tx: Option<&tokio::sync::watch::Sender<State>>,
 ) -> Result<()> {
     #[allow(unused_assignments)] // Init is overwritten after GET_CAPS; kept for clarity
     let mut state = State::Init;
+
+    // Helper to update state and notify observers.
+    let set_state = |s: State, state: &mut State| {
+        *state = s;
+        if let Some(tx) = state_tx {
+            let _ = tx.send(s);
+        }
+    };
 
     // Subscribe to notifications
     let ctl_stream = chars.ctl.notify().await?;
@@ -66,7 +86,7 @@ pub async fn run_session(
     // Send GET_CAPS
     chars.tx.write(CMD_GET_CAPS).await?;
     tracing::info!("Sent GET_CAPS");
-    state = State::Ready;
+    set_state(State::Ready, &mut state);
 
     let mut last_seq: Option<u16> = None;
 
@@ -95,12 +115,12 @@ pub async fn run_session(
                             chars.tx.write(CMD_MIC_CLOSE).await?;
                             tracing::info!("Sent MIC_CLOSE");
                         }
-                        state = State::Ready;
+                        set_state(State::Ready, &mut state);
                         last_seq = None;
                     }
                     CTL_AUDIO_START => {
                         tracing::info!("AUDIO_START");
-                        state = State::Streaming;
+                        set_state(State::Streaming, &mut state);
                     }
                     CTL_START_SEARCH => {
                         tracing::info!("START_SEARCH (state={:?}, mode={:?})", state, mic_mode);
@@ -116,7 +136,7 @@ pub async fn run_session(
                                     // Toggle: second press stops streaming
                                     chars.tx.write(CMD_MIC_CLOSE).await?;
                                     tracing::info!("Sent MIC_CLOSE (toggle off)");
-                                    state = State::Ready;
+                                    set_state(State::Ready, &mut state);
                                     last_seq = None;
                                 }
                                 MicMode::Hold => {
@@ -126,13 +146,13 @@ pub async fn run_session(
                                     last_seq = None;
                                     chars.tx.write(CMD_MIC_OPEN).await?;
                                     tracing::info!("Sent MIC_OPEN");
-                                    state = State::Opening;
+                                    set_state(State::Opening, &mut state);
                                 }
                             }
                         } else {
                             chars.tx.write(CMD_MIC_OPEN).await?;
                             tracing::info!("Sent MIC_OPEN");
-                            state = State::Opening;
+                            set_state(State::Opening, &mut state);
                         }
                     }
                     CTL_GET_CAPS_RESP => {
@@ -168,16 +188,54 @@ pub async fn run_session(
                     let _ = audio_tx.send(data).await;
                 }
             }
+            // External commands (D-Bus, etc.)
+            Some(cmd) = async {
+                match command_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                tracing::info!("External command: {:?} (state={:?})", cmd, state);
+                match cmd {
+                    ExternalCommand::MicOpen => {
+                        if state == State::Ready {
+                            chars.tx.write(CMD_MIC_OPEN).await?;
+                            tracing::info!("Sent MIC_OPEN (external)");
+                            set_state(State::Opening, &mut state);
+                        }
+                    }
+                    ExternalCommand::MicClose => {
+                        if state == State::Streaming || state == State::Opening {
+                            chars.tx.write(CMD_MIC_CLOSE).await?;
+                            tracing::info!("Sent MIC_CLOSE (external)");
+                            set_state(State::Ready, &mut state);
+                            last_seq = None;
+                        }
+                    }
+                    ExternalCommand::MicToggle => {
+                        if state == State::Streaming || state == State::Opening {
+                            chars.tx.write(CMD_MIC_CLOSE).await?;
+                            tracing::info!("Sent MIC_CLOSE (external toggle)");
+                            set_state(State::Ready, &mut state);
+                            last_seq = None;
+                        } else if state == State::Ready {
+                            chars.tx.write(CMD_MIC_OPEN).await?;
+                            tracing::info!("Sent MIC_OPEN (external toggle)");
+                            set_state(State::Opening, &mut state);
+                        }
+                    }
+                }
+            }
             () = &mut frame_timer, if frame_timeout_enabled && (state == State::Streaming || state == State::Opening) => {
                 tracing::info!("Frame timeout ({:?}) — device likely asleep, closing mic", timeouts.frame_timeout);
                 let _ = chars.tx.write(CMD_MIC_CLOSE).await;
-                state = State::Ready;
+                set_state(State::Ready, &mut state);
                 last_seq = None;
             }
             () = &mut idle_timer, if idle_timeout_enabled && (state == State::Streaming || state == State::Opening) => {
                 tracing::info!("Idle timeout ({:?}) — no button activity, closing mic", timeouts.idle_timeout);
                 let _ = chars.tx.write(CMD_MIC_CLOSE).await;
-                state = State::Ready;
+                set_state(State::Ready, &mut state);
                 last_seq = None;
             }
             else => {

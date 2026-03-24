@@ -5,6 +5,10 @@ edition = "2021"
 description = "Google ATV Voice over BLE daemon for Linux/PipeWire"
 license = "MIT"
 
+[features]
+default = ["dbus"]
+dbus = ["dep:zbus"]
+
 [dependencies]
 bluer = { version = "0.17", features = ["bluetoothd"] }
 pipewire = { version = "0.8", features = ["v0_3_49"] }
@@ -14,3 +18,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 anyhow = "1"
+zbus = { version = "5", features = ["tokio"], optional = true }
