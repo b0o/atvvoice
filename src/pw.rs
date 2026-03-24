@@ -5,7 +5,9 @@
 //! microphone source.
 
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use pipewire::keys;
 use pipewire::properties::properties;
@@ -69,9 +71,12 @@ pub fn run_pw_source(
     // Buffer of pending PCM samples not yet consumed by PipeWire callbacks.
     // The process callback drains from the front.
     let pending: std::cell::RefCell<Vec<i16>> = std::cell::RefCell::new(Vec::new());
-    let disconnected: std::cell::Cell<bool> = std::cell::Cell::new(false);
 
-    let mainloop_weak = mainloop.downgrade();
+    // Shared flag: process callback sets this when the audio channel disconnects.
+    // A timer on the mainloop checks it and performs orderly teardown.
+    let should_quit = Arc::new(AtomicBool::new(false));
+    let should_quit_cb = should_quit.clone();
+
     let _listener = stream
         .add_local_listener_with_user_data(())
         .state_changed(|_, _, old, new| {
@@ -89,13 +94,7 @@ pub fn run_pw_source(
                         }
                         Err(mpsc::TryRecvError::Empty) => break,
                         Err(mpsc::TryRecvError::Disconnected) => {
-                            if !disconnected.get() {
-                                disconnected.set(true);
-                                tracing::info!("Audio channel disconnected, stopping PipeWire source");
-                                if let Some(ml) = mainloop_weak.upgrade() {
-                                    ml.quit();
-                                }
-                            }
+                            should_quit_cb.store(true, Ordering::Relaxed);
                             return;
                         }
                     }
@@ -194,24 +193,43 @@ pub fn run_pw_source(
 
     tracing::info!("PipeWire source running (8kHz S16LE mono, gain={gain_db}dB)");
 
-    // Blocks until the main loop is quit (by the process callback on channel disconnect).
+    // Poll for shutdown every 100ms. When the process callback signals disconnect,
+    // we disconnect the stream (removing it from PipeWire) while the loop is still
+    // alive, then quit. This avoids the pw_loop_check SEGV that happens if
+    // Stream is dropped after MainLoop has exited.
+    let timer = mainloop.loop_().add_timer({
+        let should_quit = should_quit.clone();
+        let mainloop_weak = mainloop.downgrade();
+        move |_| {
+            if should_quit.load(Ordering::Relaxed) {
+                tracing::info!("Audio channel disconnected, stopping PipeWire source");
+                if let Some(ml) = mainloop_weak.upgrade() {
+                    ml.quit();
+                }
+            }
+        }
+    });
+    timer.update_timer(
+        Some(std::time::Duration::from_millis(100)),
+        Some(std::time::Duration::from_millis(100)),
+    );
+
+    // Blocks until quit is called from the timer callback.
     mainloop.run();
 
-    // PipeWire's C library crashes (pw_loop_check assert) if we drop the Stream
-    // after the MainLoop has exited. The stream/listener/core/context all hold
-    // internal references to the loop, and destroying them after loop shutdown
-    // triggers use-after-free in libpipewire.
-    //
-    // Since this thread is about to exit, we intentionally leak these objects.
-    // The OS reclaims all resources when the thread terminates. This is safe
-    // because we're the only consumer and the thread exits immediately after.
-    std::mem::forget(_listener);
-    std::mem::forget(stream);
-    std::mem::forget(core);
-    std::mem::forget(context);
-    std::mem::forget(mainloop);
+    // Orderly teardown while mainloop infrastructure is still intact.
+    // disconnect() removes the stream from PipeWire's graph (node disappears
+    // from pavucontrol). Then normal Rust drop order handles the rest.
+    let _ = stream.disconnect();
+    drop(_listener);
+    drop(timer);
+    drop(stream);
+    drop(core);
+    drop(context);
+    // MainLoop is dropped last (implicit).
 
     tracing::info!("PipeWire source stopped");
+    unsafe { pipewire::deinit() };
 
     Ok(())
 }
