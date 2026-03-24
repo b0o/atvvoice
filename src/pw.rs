@@ -4,9 +4,8 @@
 //! frames via [`std::sync::mpsc`] and pushes them to PipeWire as a virtual
 //! microphone source.
 //!
-//! Uses reference-counted PipeWire types (`MainLoopRc`, `ContextRc`, `CoreRc`,
-//! `StreamRc`) so the mainloop stays alive during `Stream::drop`, avoiding
-//! SEGV in `pw_stream_destroy` / `pw_main_loop_destroy`.
+//! Uses `MainLoopRc` so the shutdown handler can clone the mainloop reference,
+//! and normal Rust drop order handles teardown after `mainloop.run()` returns.
 
 use std::io;
 use std::sync::mpsc;
@@ -20,7 +19,7 @@ use pipewire::spa::param::ParamType;
 use pipewire::spa::pod::serialize::PodSerializer;
 use pipewire::spa::pod::{Object, Pod, Value};
 use pipewire::spa::utils::{Direction, SpaTypes};
-use pipewire::stream::{StreamFlags, StreamRc};
+use pipewire::stream::{Stream, StreamFlags, StreamRc};
 
 /// Sample rate for ATVV audio (8 kHz mono).
 const SAMPLE_RATE: u32 = 8000;
@@ -50,6 +49,23 @@ pub fn run_pw_source(
     pipewire::init();
 
     let mainloop = MainLoopRc::new(None)?;
+
+    // Shared slot for the stream — set after creation, used by shutdown handler.
+    let stream_slot: std::rc::Rc<std::cell::RefCell<Option<StreamRc>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+    let _receiver = shutdown_rx.attach(mainloop.loop_(), {
+        let mainloop = mainloop.clone();
+        let stream_slot = stream_slot.clone();
+        move |_: Shutdown| {
+            tracing::info!("PipeWire source shutting down");
+            // Disconnect stream while mainloop is alive (cpal pattern).
+            if let Some(stream) = stream_slot.borrow().as_ref() {
+                let _ = stream.disconnect();
+            }
+            mainloop.quit();
+        }
+    });
+
     let context = ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
 
@@ -66,6 +82,9 @@ pub fn run_pw_source(
         },
     )?;
 
+    // Give the shutdown handler a reference to the stream.
+    *stream_slot.borrow_mut() = Some(stream.clone());
+
     // Buffer of pending PCM samples not yet consumed by PipeWire callbacks.
     let pending: std::cell::RefCell<Vec<i16>> = std::cell::RefCell::new(Vec::new());
 
@@ -74,7 +93,7 @@ pub fn run_pw_source(
         .state_changed(|_, _, old, new| {
             tracing::debug!("PipeWire stream state: {old:?} -> {new:?}");
         })
-        .process(move |stream, _| {
+        .process(move |stream: &Stream, _| {
             {
                 let mut buf = pending.borrow_mut();
                 loop {
@@ -171,32 +190,16 @@ pub fn run_pw_source(
 
     tracing::info!("PipeWire source running (8kHz S16LE mono, gain={gain_db}dB)");
 
-    // Shutdown handler: disconnect + quit while the loop is alive.
-    // Uses StreamRc clone so the stream can be shared.
-    // Following the pattern from RustAudio/cpal.
-    let stream_clone = stream.clone();
-    let mainloop_clone = mainloop.clone();
-    let _shutdown = shutdown_rx.attach(mainloop.loop_(), move |_: Shutdown| {
-        tracing::info!("PipeWire source shutting down");
-        let _ = stream_clone.disconnect();
-        mainloop_clone.quit();
-    });
-
-    // Blocks until quit is called from the shutdown handler.
+    // Block until quit.
     mainloop.run();
 
-    // Orderly teardown. StreamRc/CoreRc/ContextRc/MainLoopRc use Rc internally,
-    // so the mainloop stays alive until the last reference is dropped. This means
-    // pw_stream_destroy (called by StreamRc::drop) can safely access the loop.
-    // Drop in dependency order: listener first, then stream, then infra.
+    // Follow cpal's exact drop pattern: explicitly drop listener and context
+    // first, let stream, _receiver, and mainloop drop at function scope end.
+    // Do NOT call pipewire::deinit() — it's process-global and we may create
+    // another PW thread on reconnect.
     drop(_listener);
-    drop(_shutdown);
-    drop(stream);
     drop(context);
-    // mainloop dropped last (implicit)
 
     tracing::info!("PipeWire source stopped");
-    unsafe { pipewire::deinit() };
-
     Ok(())
 }
