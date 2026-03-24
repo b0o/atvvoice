@@ -138,20 +138,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let gain = cli.gain;
+    let ble_name = device.name().await.ok().flatten().unwrap_or_default();
     #[allow(unused_variables)]
-    let (node_name, dbus_name, default_description) = match &cli.name {
+    let (node_name, dbus_name) = match &cli.name {
         Some(suffix) => (
             format!("atvvoice-{suffix}"),
             format!("org.atvvoice.{suffix}"),
-            format!("ATVVoice Microphone ({suffix})"),
         ),
         None => (
             "atvvoice".to_string(),
             "org.atvvoice".to_string(),
-            "ATVVoice Microphone".to_string(),
         ),
     };
-    let node_description = cli.description.unwrap_or(default_description);
+    let node_description = cli.description.unwrap_or_else(|| {
+        if ble_name.is_empty() {
+            "ATVVoice Microphone".to_string()
+        } else {
+            ble_name.clone()
+        }
+    });
 
     // State watch channel: atvv -> D-Bus (if enabled).
     let (state_tx, _state_rx) = tokio::sync::watch::channel(atvv::State::Init);
