@@ -149,31 +149,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Outer loop: discover → connect → session. Restarts on lock errors in auto mode.
     'discover: loop {
-        // Find ATVV device (retries until found)
+        // Find ATVV device (retries until found, interruptible by ctrl+c)
         let device = loop {
-            match ble::find_atvv_device(&adapter, filter_addr, &excluded_addrs).await {
-                Ok(device) => break device,
-                Err(e) => {
-                    tracing::info!("No ATVV device found ({e}), retrying in 5s...");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::select! {
+                result = ble::find_atvv_device(&adapter, filter_addr, &excluded_addrs) => {
+                    match result {
+                        Ok(device) => break device,
+                        Err(e) => {
+                            tracing::info!("No ATVV device found ({e}), retrying in 5s...");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                    }
+                }
+                _ = &mut ctrl_c => {
+                    tracing::info!("Shutting down");
+                    return Ok(());
                 }
             }
         };
 
-        ensure_connected(&device).await;
+        tokio::select! {
+            _ = ensure_connected(&device) => {}
+            _ = &mut ctrl_c => {
+                tracing::info!("Shutting down");
+                return Ok(());
+            }
+        }
 
-        // Resolve GATT characteristics (retries on failure)
+        // Resolve GATT characteristics (retries on failure, interruptible)
         let mut chars = loop {
-            match ble::resolve_chars(&device).await {
-                Ok(c) => {
-                    tracing::info!("ATVV characteristics resolved");
-                    break c;
+            tokio::select! {
+                result = ble::resolve_chars(&device) => {
+                    match result {
+                        Ok(c) => {
+                            tracing::info!("ATVV characteristics resolved");
+                            break c;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to resolve characteristics ({e}), retrying in 2s..."
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to resolve characteristics ({e}), retrying in 2s..."
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                _ = &mut ctrl_c => {
+                    tracing::info!("Shutting down");
+                    return Ok(());
                 }
             }
         };
