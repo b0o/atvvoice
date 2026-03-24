@@ -23,7 +23,10 @@ If you have a remote you'd like to test, open an issue with the device name, Blu
 
 ```nix
 # flake.nix
-inputs.atvvoice.url = "github:b0o/atvvoice";
+inputs.atvvoice = {
+  url = "github:b0o/atvvoice";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
 ```
 
 **Home Manager module:**
