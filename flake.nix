@@ -83,8 +83,9 @@
           };
 
           device = mkOption {
-            type = types.str;
-            description = "Bluetooth address of the remote (e.g. AA:BB:CC:DD:EE:FF).";
+            type = types.nullOr types.str;
+            default = null;
+            description = "Bluetooth address of the remote (e.g. AA:BB:CC:DD:EE:FF). null = auto-detect first ATVV device.";
           };
 
           adapter = mkOption {
@@ -134,12 +135,12 @@
             Service = let
               args =
                 [
-                  "-d" cfg.device
                   "-g" (toString cfg.gain)
                   "-m" cfg.mode
                   "--frame-timeout" (toString cfg.frameTimeout)
                   "--idle-timeout" (toString cfg.idleTimeout)
                 ]
+                ++ lib.optionals (cfg.device != null) ["-d" cfg.device]
                 ++ lib.optionals (cfg.adapter != null) ["-a" cfg.adapter]
                 ++ lib.genList (_: "-v") cfg.verbose;
             in {
