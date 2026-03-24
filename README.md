@@ -67,9 +67,8 @@ atvvoice [OPTIONS]
 | `-m, --mode` | toggle | `toggle` (press on/off) or `hold` (hold to stream)\* |
 | `--frame-timeout` | 5 | Seconds without frames before auto-closing mic (device asleep). 0 = disabled. |
 | `-t, --idle-timeout` | 0 | Seconds since last button press before auto-closing mic. 0 = disabled. |
-| `--node-name` | atvvoice | PipeWire node name |
-| `--node-description` | ATVVoice Microphone | PipeWire node description (shown in audio settings) |
-| `--dbus-name` | org.atvvoice | D-Bus bus name |
+| `-n, --name` | | Instance name suffix. Sets PW node and D-Bus name (e.g. `--name living-room`). |
+| `--description` | ATVVoice Microphone | PipeWire node description (shown in audio settings) |
 | `--no-dbus` | | Disable D-Bus control interface |
 | `-v` | off | Verbosity (`-v` debug, `-vv` trace) |
 
@@ -79,12 +78,14 @@ The remote appears as "ATVVoice Microphone" in PipeWire/PulseAudio audio input s
 
 ### Multiple remotes
 
-Each ATVVoice instance handles one remote. To use multiple remotes, run separate instances with different `-d` addresses and `--node-name`/`--node-description` to avoid PipeWire naming collisions:
-C
+Each ATVVoice instance handles one remote. To use multiple remotes, run separate instances with `--name` to avoid PipeWire and D-Bus collisions:
+
 ```
-atvvoice -d AA:BB:CC:DD:EE:FF --node-name atvvoice-living-room --node-description "Living Room Remote" --dbus-name org.atvvoice.living_room &
-atvvoice -d 11:22:33:44:55:66 --node-name atvvoice-bedroom --node-description "Bedroom Remote" --dbus-name org.atvvoice.bedroom &
+atvvoice -d AA:BB:CC:DD:EE:FF --name living-room &
+atvvoice -d 11:22:33:44:55:66 --name bedroom &
 ```
+
+This creates PW nodes `atvvoice-living-room` / `atvvoice-bedroom` and D-Bus names `org.atvvoice.living-room` / `org.atvvoice.bedroom`.
 
 ## Home Manager options
 
@@ -118,15 +119,13 @@ services.atvvoice = {
   # Log verbosity: 0 = info, 1 = debug, 2+ = trace. null (default) = 0.
   verbose = 1;
 
-  # PipeWire node name. null (default) = "atvvoice".
-  nodeName = null;
+  # Instance name suffix. Sets PW node name (atvvoice-<name>) and D-Bus name
+  # (org.atvvoice.<name>). null (default) = no suffix.
+  name = null;
 
   # PipeWire node description (shown in audio settings).
-  # null (default) = "ATVVoice Microphone".
-  nodeDescription = null;
-
-  # D-Bus bus name. null (default) = "org.atvvoice".
-  dbusName = null;
+  # null (default) = "ATVVoice Microphone" or "ATVVoice Microphone (<name>)".
+  description = null;
 
   # Disable D-Bus control interface. Default: false.
   noDbus = false;

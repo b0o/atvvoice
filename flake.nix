@@ -124,22 +124,16 @@
             description = "Log verbosity. null = app default (0/info).";
           };
 
-          nodeName = mkOption {
+          name = mkOption {
             type = types.nullOr types.str;
             default = null;
-            description = "PipeWire node name. null = app default (atvvoice).";
+            description = "Instance name suffix. Sets PipeWire node name (atvvoice-<name>) and D-Bus bus name (org.atvvoice.<name>).";
           };
 
-          nodeDescription = mkOption {
+          description = mkOption {
             type = types.nullOr types.str;
             default = null;
-            description = "PipeWire node description (shown in audio settings). null = app default (ATVVoice Microphone).";
-          };
-
-          dbusName = mkOption {
-            type = types.nullOr types.str;
-            default = null;
-            description = "D-Bus bus name. null = app default (org.atvvoice).";
+            description = "PipeWire node description (shown in audio settings). null = 'ATVVoice Microphone' or 'ATVVoice Microphone (<name>)'.";
           };
 
           noDbus = mkOption {
@@ -165,9 +159,8 @@
                 ++ lib.optionals (cfg.frameTimeout != null) ["--frame-timeout" (toString cfg.frameTimeout)]
                 ++ lib.optionals (cfg.idleTimeout != null) ["--idle-timeout" (toString cfg.idleTimeout)]
                 ++ lib.optionals (cfg.verbose != null) (lib.genList (_: "-v") cfg.verbose)
-                ++ lib.optionals (cfg.nodeName != null) ["--node-name" cfg.nodeName]
-                ++ lib.optionals (cfg.nodeDescription != null) ["--node-description" cfg.nodeDescription]
-                ++ lib.optionals (cfg.dbusName != null) ["--dbus-name" cfg.dbusName]
+                ++ lib.optionals (cfg.name != null) ["--name" cfg.name]
+                ++ lib.optionals (cfg.description != null) ["--description" cfg.description]
                 ++ lib.optionals cfg.noDbus ["--no-dbus"];
             in {
               Type = "simple";

@@ -34,18 +34,16 @@ struct Cli {
     #[arg(short = 't', long, default_value = "0")]
     idle_timeout: u64,
 
-    /// PipeWire node name
-    #[arg(long, default_value = "atvvoice")]
-    node_name: String,
+    /// Instance name suffix. Sets PipeWire node name and D-Bus bus name.
+    /// e.g. --name living-room → node "atvvoice-living-room",
+    /// D-Bus "org.atvvoice.living-room"
+    #[arg(short, long)]
+    name: Option<String>,
 
-    /// PipeWire node description (shown in audio settings)
-    #[arg(long, default_value = "ATVVoice Microphone")]
-    node_description: String,
-
-    /// D-Bus bus name
-    #[cfg(feature = "dbus")]
-    #[arg(long, default_value = "org.atvvoice")]
-    dbus_name: String,
+    /// PipeWire node description (shown in audio settings).
+    /// Default: "ATVVoice Microphone" (or "ATVVoice Microphone (<name>)" if --name is set)
+    #[arg(long)]
+    description: Option<String>,
 
     /// Disable D-Bus control interface
     #[cfg(feature = "dbus")]
@@ -140,8 +138,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let gain = cli.gain;
-    let node_name = cli.node_name;
-    let node_description = cli.node_description;
+    #[allow(unused_variables)]
+    let (node_name, dbus_name, default_description) = match &cli.name {
+        Some(suffix) => (
+            format!("atvvoice-{suffix}"),
+            format!("org.atvvoice.{suffix}"),
+            format!("ATVVoice Microphone ({suffix})"),
+        ),
+        None => (
+            "atvvoice".to_string(),
+            "org.atvvoice".to_string(),
+            "ATVVoice Microphone".to_string(),
+        ),
+    };
+    let node_description = cli.description.unwrap_or(default_description);
 
     // State watch channel: atvv -> D-Bus (if enabled).
     let (state_tx, _state_rx) = tokio::sync::watch::channel(atvv::State::Init);
@@ -153,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             device_address: device_addr,
             node_name: node_name.clone(),
         };
-        match dbus::serve(_state_rx, info, &cli.dbus_name).await {
+        match dbus::serve(_state_rx, info, &dbus_name).await {
             Ok((cmd_rx, conn)) => (Some(cmd_rx), Some(conn)),
             Err(e) => {
                 tracing::warn!("Failed to register D-Bus interface: {}", e);
