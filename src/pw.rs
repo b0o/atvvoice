@@ -197,15 +197,21 @@ pub fn run_pw_source(
     // Blocks until the main loop is quit (by the process callback on channel disconnect).
     mainloop.run();
 
-    // Explicit drop order to avoid use-after-free in PipeWire hooks:
-    // 1. Disconnect the stream (removes it from PipeWire graph)
-    // 2. Drop listener (removes hook callbacks)
-    // 3. Drop stream, core, context, mainloop (natural reverse order)
-    stream.disconnect()?;
-    drop(_listener);
+    // PipeWire's C library crashes (pw_loop_check assert) if we drop the Stream
+    // after the MainLoop has exited. The stream/listener/core/context all hold
+    // internal references to the loop, and destroying them after loop shutdown
+    // triggers use-after-free in libpipewire.
+    //
+    // Since this thread is about to exit, we intentionally leak these objects.
+    // The OS reclaims all resources when the thread terminates. This is safe
+    // because we're the only consumer and the thread exits immediately after.
+    std::mem::forget(_listener);
+    std::mem::forget(stream);
+    std::mem::forget(core);
+    std::mem::forget(context);
+    std::mem::forget(mainloop);
 
     tracing::info!("PipeWire source stopped");
-    unsafe { pipewire::deinit() };
 
     Ok(())
 }
