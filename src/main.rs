@@ -134,36 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Create channels:
-    // tokio mpsc: atvv -> decoder bridge
-    // std mpsc: decoder -> pipewire bridge
-    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
-    let (pcm_tx, pcm_rx) = std::sync::mpsc::channel::<Vec<i16>>();
-
-    // Spawn PipeWire thread
     let gain = cli.gain;
     let node_name = cli.node_name;
     let node_description = cli.node_description;
-    #[cfg(feature = "dbus")]
-    let pw_node_name = node_name.clone();
-    std::thread::spawn(move || {
-        if let Err(e) = pw::run_pw_source(pcm_rx, gain, &node_name, &node_description) {
-            tracing::error!("PipeWire error: {}", e);
-        }
-    });
-
-    // Spawn decoder task
-    let decoder_handle = tokio::spawn(async move {
-        while let Some(frame_data) = frame_rx.recv().await {
-            if frame_data.len() == adpcm::FRAME_SIZE {
-                let frame: [u8; 134] = frame_data.try_into().unwrap();
-                let (_seq, mut samples) = adpcm::decode_frame(&frame);
-                adpcm::declip(&mut samples);
-                adpcm::lowpass(&mut samples);
-                let _ = pcm_tx.send(samples.to_vec());
-            }
-        }
-    });
 
     // State watch channel: atvv -> D-Bus (if enabled).
     let (state_tx, _state_rx) = tokio::sync::watch::channel(atvv::State::Init);
@@ -173,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut dbus_cmd_rx, _dbus_conn) = if !cli.no_dbus {
         let info = dbus::DaemonInfo {
             device_address: device_addr,
-            node_name: pw_node_name.clone(),
+            node_name: node_name.clone(),
         };
         match dbus::serve(_state_rx, info).await {
             Ok((cmd_rx, conn)) => (Some(cmd_rx), Some(conn)),
@@ -195,13 +168,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         idle_timeout: std::time::Duration::from_secs(cli.idle_timeout),
     };
 
-    // Run ATVV session with reconnection loop
+    // Run ATVV session with reconnection loop.
+    // Channels and PipeWire thread are created per-session so the PW source
+    // disappears from audio settings when the device disconnects.
     loop {
+        // Create per-session channels and audio pipeline.
+        let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+        let (pcm_tx, pcm_rx) = std::sync::mpsc::channel::<Vec<i16>>();
+
+        let pw_name = node_name.clone();
+        let pw_desc = node_description.clone();
+        let pw_thread = std::thread::spawn(move || {
+            if let Err(e) = pw::run_pw_source(pcm_rx, gain, &pw_name, &pw_desc) {
+                tracing::error!("PipeWire error: {}", e);
+            }
+        });
+
+        let decoder_handle = tokio::spawn(async move {
+            while let Some(frame_data) = frame_rx.recv().await {
+                if frame_data.len() == adpcm::FRAME_SIZE {
+                    let frame: [u8; 134] = frame_data.try_into().unwrap();
+                    let (_seq, mut samples) = adpcm::decode_frame(&frame);
+                    adpcm::declip(&mut samples);
+                    adpcm::lowpass(&mut samples);
+                    let _ = pcm_tx.send(samples.to_vec());
+                }
+            }
+        });
+
         let ble_device = ble::BluerDevice { device: &device, chars: &chars };
-        tokio::select! {
+        let session_result = tokio::select! {
             result = atvv::run_session(
                 &ble_device,
-                frame_tx.clone(),
+                frame_tx,
                 cli.mode,
                 &timeouts,
                 {
@@ -211,39 +210,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     { None }
                 },
                 Some(&state_tx),
-            ) => {
-                match result {
-                    Ok(()) => tracing::info!("Session ended cleanly"),
-                    Err(e) => tracing::warn!("Session error: {}", e),
-                }
-                // Wait for device to reconnect
-                tracing::info!("Waiting for device to reconnect...");
-                ensure_connected(&device).await;
-                tracing::info!("Device reconnected");
-
-                // Re-resolve characteristics (handles may change after reconnect)
-                chars = loop {
-                    match ble::resolve_chars(&device).await {
-                        Ok(c) => {
-                            tracing::info!("ATVV characteristics re-resolved");
-                            break c;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to re-resolve characteristics ({e}), retrying in 2s...");
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        }
-                    }
-                };
-            }
+            ) => result,
             _ = &mut ctrl_c => {
                 // Send MIC_CLOSE on graceful shutdown
                 let _ = chars.tx.write(atvv::CMD_MIC_CLOSE).await;
                 tracing::info!("Sent MIC_CLOSE, shutting down");
                 break;
             }
+        };
+
+        // Session ended — tear down audio pipeline.
+        // Dropping frame_tx closes the channel, which causes decoder to end,
+        // which drops pcm_tx, which causes PW thread to detect Disconnected and quit.
+        decoder_handle.abort();
+        let _ = pw_thread.join();
+
+        match session_result {
+            Ok(()) => tracing::info!("Session ended"),
+            Err(e) => tracing::warn!("Session error: {}", e),
         }
+
+        // Update D-Bus state
+        let _ = state_tx.send(atvv::State::Init);
+
+        // Wait for device to reconnect
+        ensure_connected(&device).await;
+        tracing::info!("Device reconnected");
+
+        // Re-resolve characteristics (handles may change after reconnect)
+        chars = loop {
+            match ble::resolve_chars(&device).await {
+                Ok(c) => {
+                    tracing::info!("ATVV characteristics re-resolved");
+                    break c;
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to re-resolve characteristics ({e}), retrying in 2s...");
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        };
     }
 
-    decoder_handle.abort();
     Ok(())
 }

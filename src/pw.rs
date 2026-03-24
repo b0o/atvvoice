@@ -37,6 +37,8 @@ const SAMPLE_SIZE: usize = std::mem::size_of::<i16>();
 ///
 /// This function blocks the calling thread by running the PipeWire main loop.
 /// Call from a dedicated `std::thread::spawn`.
+/// Runs the PipeWire audio source. Returns when the `audio_rx` channel
+/// disconnects (all senders dropped).
 pub fn run_pw_source(
     audio_rx: mpsc::Receiver<Vec<i16>>,
     gain_db: f32,
@@ -67,7 +69,9 @@ pub fn run_pw_source(
     // Buffer of pending PCM samples not yet consumed by PipeWire callbacks.
     // The process callback drains from the front.
     let pending: std::cell::RefCell<Vec<i16>> = std::cell::RefCell::new(Vec::new());
+    let disconnected: std::cell::Cell<bool> = std::cell::Cell::new(false);
 
+    let mainloop_weak = mainloop.downgrade();
     let _listener = stream
         .add_local_listener_with_user_data(())
         .state_changed(|_, _, old, new| {
@@ -84,7 +88,16 @@ pub fn run_pw_source(
                             buf.extend_from_slice(&frame);
                         }
                         Err(mpsc::TryRecvError::Empty) => break,
-                        Err(mpsc::TryRecvError::Disconnected) => break,
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            if !disconnected.get() {
+                                disconnected.set(true);
+                                tracing::info!("Audio channel disconnected, stopping PipeWire source");
+                                if let Some(ml) = mainloop_weak.upgrade() {
+                                    ml.quit();
+                                }
+                            }
+                            return;
+                        }
                     }
                 }
             }
@@ -181,9 +194,10 @@ pub fn run_pw_source(
 
     tracing::info!("PipeWire source running (8kHz S16LE mono, gain={gain_db}dB)");
 
-    // Blocks until the main loop is quit.
+    // Blocks until the main loop is quit (by the process callback on channel disconnect).
     mainloop.run();
 
+    tracing::info!("PipeWire source stopped");
     unsafe { pipewire::deinit() };
 
     Ok(())
