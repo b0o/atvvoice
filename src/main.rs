@@ -60,7 +60,7 @@ struct Cli {
 fn sanitize_name(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
-        if c.is_ascii_alphanumeric() {
+        if c.is_ascii_alphanumeric() || c == '_' {
             result.push(c.to_ascii_lowercase());
         } else if !result.ends_with('-') {
             result.push('-');
@@ -161,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if sanitized != name {
                 eprintln!(
                     "error: --name {name:?} contains invalid characters. \
-                     Use lowercase alphanumeric and hyphens only (e.g. --name {sanitized:?})."
+                     Use lowercase alphanumeric, hyphens, and underscores only (e.g. --name {sanitized:?})."
                 );
                 std::process::exit(1);
             }
