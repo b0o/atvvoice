@@ -1,6 +1,6 @@
 # atvvoice
 
-Linux daemon that captures voice audio from BLE TV remotes using the [Google Voice over BLE (ATVV)](https://blog.csdn.net/Weichen_Huang/article/details/109251338) protocol and exposes it as a PipeWire virtual microphone.
+Linux daemon that captures voice audio from BLE TV remotes using the Google Voice over BLE (ATVV) protocol and exposes it as a PipeWire virtual microphone.
 
 ### Supported devices
 
