@@ -6,7 +6,7 @@ Linux daemon that captures voice audio from BLE TV remotes using the [Google Voi
 
 | Device | Status |
 |--------|--------|
-| G20S Pro | Verified working |
+| G20S Pro / G20S Pro Plus / G20BTS Plus | Verified working |
 | UR02 | Should work, untested |
 | Other ATVV-compatible remotes | Unknown |
 
