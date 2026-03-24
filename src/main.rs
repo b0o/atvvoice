@@ -8,7 +8,7 @@ pub mod pw;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "atvvoice", about = "BLE voice remote microphone daemon")]
+#[command(name = "atvvoice", about = "ATVVoice — BLE voice remote microphone daemon")]
 struct Cli {
     /// Filter by Bluetooth address (e.g., AA:BB:CC:DD:EE:FF)
     #[arg(short, long)]
@@ -33,6 +33,14 @@ struct Cli {
     /// Close mic after N seconds since last button press (user inactive). 0 = disabled.
     #[arg(short = 't', long, default_value = "0")]
     idle_timeout: u64,
+
+    /// PipeWire node name
+    #[arg(long, default_value = "atvvoice")]
+    node_name: String,
+
+    /// PipeWire node description (shown in audio settings)
+    #[arg(long, default_value = "ATVVoice Microphone")]
+    node_description: String,
 
     /// Disable D-Bus control interface
     #[cfg(feature = "dbus")]
@@ -121,8 +129,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn PipeWire thread
     let gain = cli.gain;
+    let node_name = cli.node_name;
+    let node_description = cli.node_description;
+    let pw_node_name = node_name.clone();
     std::thread::spawn(move || {
-        if let Err(e) = pw::run_pw_source(pcm_rx, gain) {
+        if let Err(e) = pw::run_pw_source(pcm_rx, gain, &node_name, &node_description) {
             tracing::error!("PipeWire error: {}", e);
         }
     });
@@ -148,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut dbus_cmd_rx, _dbus_conn) = if !cli.no_dbus {
         let info = dbus::DaemonInfo {
             device_address: device_addr,
-            node_name: "atvvoice".to_string(),
+            node_name: pw_node_name.clone(),
         };
         match dbus::serve(_state_rx, info).await {
             Ok((cmd_rx, conn)) => (Some(cmd_rx), Some(conn)),

@@ -1,4 +1,4 @@
-# atvvoice
+# ATVVoice
 
 Linux daemon that captures voice audio from BLE TV remotes using the [Android TV Voice over BLE (ATVV)](https://ralexeev.github.io/smart_remote_3_nrf52/html/group__ble__atvv.html) protocol and exposes it as a PipeWire virtual microphone.
 
@@ -85,7 +85,7 @@ atvvoice -d <BT_ADDRESS> [OPTIONS]
 
 \*Not all remotes support hold-to-stream. The G20S Pro sends a button press event on both press and release, so it only works in toggle mode.
 
-Without `-d`, atvvoice scans bonded devices for the ATVV service UUID and connects to the first match. Use `-d` to target a specific remote by address.
+Without `-d`, ATVVoice scans bonded devices for the ATVV service UUID and connects to the first match. Use `-d` to target a specific remote by address.
 
 ### Multiple remotes
 
@@ -104,7 +104,7 @@ Example:
 atvvoice -d AA:BB:CC:DD:EE:FF -v --idle-timeout 300
 ```
 
-The remote appears as "BLE Voice Remote" in PipeWire/PulseAudio audio input settings.
+The remote appears as "ATVVoice Microphone" in PipeWire/PulseAudio audio input settings.
 
 ## Home Manager options
 
@@ -138,7 +138,7 @@ services.atvvoice = {
 
 ## D-Bus control interface
 
-When built with the `dbus` feature (enabled by default), atvvoice exposes `org.atvvoice.Daemon` on the session bus.
+When built with the `dbus` feature (enabled by default), ATVVoice exposes `org.atvvoice.Daemon` on the session bus.
 
 ```
 # Toggle mic on/off

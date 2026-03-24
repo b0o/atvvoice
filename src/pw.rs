@@ -40,6 +40,8 @@ const SAMPLE_SIZE: usize = std::mem::size_of::<i16>();
 pub fn run_pw_source(
     audio_rx: mpsc::Receiver<Vec<i16>>,
     gain_db: f32,
+    node_name: &str,
+    node_description: &str,
 ) -> Result<(), pipewire::Error> {
     pipewire::init();
 
@@ -51,14 +53,14 @@ pub fn run_pw_source(
     // source in PipeWire/PulseAudio desktop audio settings.
     let stream = Stream::new(
         &core,
-        "atvvoice",
+        node_name,
         properties! {
             *keys::MEDIA_TYPE => "Audio",
             *keys::MEDIA_CATEGORY => "Capture",
             *keys::MEDIA_CLASS => "Audio/Source",
             *keys::MEDIA_ROLE => "Communication",
-            *keys::NODE_NAME => "atvvoice",
-            *keys::NODE_DESCRIPTION => "BLE Voice Remote",
+            *keys::NODE_NAME => node_name,
+            *keys::NODE_DESCRIPTION => node_description,
         },
     )?;
 
