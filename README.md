@@ -31,10 +31,8 @@ inputs.atvvoice.url = "github:b0o/atvvoice";
 ```nix
 imports = [ inputs.atvvoice.homeManagerModules.atvvoice ];
 
-services.atvvoice = {
-  enable = true;
-  device = "AA:BB:CC:DD:EE:FF";  # your remote's BT address
-};
+# minimal — auto-detects first ATVV device
+services.atvvoice.enable = true;
 ```
 
 **As overlay:**
@@ -107,17 +105,31 @@ The remote appears as "BLE Voice Remote" in PipeWire/PulseAudio audio input sett
 
 ## Home Manager options
 
-All CLI flags have corresponding module options:
-
 ```nix
 services.atvvoice = {
   enable = true;
+
+  # Bluetooth address. null (default) = auto-detect first ATVV device.
   device = "AA:BB:CC:DD:EE:FF";
-  mode = "toggle";           # or "hold"
+
+  # BlueZ adapter name. null (default) = auto-detect.
+  adapter = null;
+
+  # Audio gain in dB. Default: 20.
   gain = 20;
+
+  # "toggle" (default) = press on/off. "hold" = hold to stream.
+  # Not all remotes support hold mode.
+  mode = "toggle";
+
+  # Seconds without audio frames before auto-closing mic. 0 = disabled. Default: 5.
   frameTimeout = 5;
+
+  # Seconds since last button press before auto-closing mic. 0 (default) = disabled.
   idleTimeout = 300;
-  verbose = 1;               # 0-3
+
+  # Log verbosity: 0 (default) = info, 1 = debug, 2+ = trace.
+  verbose = 1;
 };
 ```
 
