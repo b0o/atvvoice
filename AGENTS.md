@@ -238,7 +238,7 @@ nix build            # Nix build
 1. Bump version in `Cargo.toml`
 2. Run `cargo check` to update `Cargo.lock` (Nix builds with `--locked`)
 3. Commit both files: `git add Cargo.toml Cargo.lock && git commit -m "chore: bump version to vX.Y.Z"`
-4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z\n\n- change 1\n- change 2"`
+4. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z\n\n- change 1\n- change 2"`
 5. Push: `git push origin main --tags`
 6. CI builds and creates the GitHub release automatically
 
