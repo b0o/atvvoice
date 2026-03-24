@@ -292,8 +292,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => {
                 let msg = e.to_string();
                 if msg.contains("exclusive") || msg.contains("NotPermitted") || msg.contains("InProgress") {
-                    // Device is locked by another instance — fatal, don't retry.
-                    tracing::error!("{e}");
+                    tracing::error!(
+                        "Device {} is already in use by another ATVVoice instance. \
+                         Only one instance can connect to a device at a time.",
+                        device.address()
+                    );
                     std::process::exit(1);
                 }
                 tracing::warn!("Session error: {e}");
