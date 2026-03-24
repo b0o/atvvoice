@@ -209,6 +209,41 @@ The implementation follows 8 sequential tasks with dependencies. Read `docs/plan
 | 7 | Integration test with real hardware | Task 6 |
 | 8 | Nix packaging & Home Manager module | Task 6 |
 
+## Build & Test
+
+```bash
+cargo check          # Type-check
+cargo test           # Run all tests
+cargo test adpcm     # Run ADPCM decoder tests only
+cargo build          # Debug build
+cargo run -- -d AA:BB:CC:DD:EE:FF -v  # Run with test remote
+cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold  # Hold-to-talk mode
+cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300  # With timeouts
+nix build            # Nix build
+```
+
+## CI & Release
+
+**CI** (`.github/workflows/ci.yml`): Runs on push to `main` and PRs.
+- `nix flake check` — evaluates all flake outputs, builds, runs tests
+- `nix build` — builds release binary
+- `nix develop --command cargo test` — runs test suite
+
+**Release** (`.github/workflows/release.yml`): Triggered by `v*` tag push or manual dispatch.
+- Builds `x86_64-linux` and `aarch64-linux` binaries via Nix (aarch64 uses QEMU)
+- Creates GitHub release with binaries and auto-generated release notes
+
+### Release process
+
+1. Bump version in `Cargo.toml`
+2. Run `cargo check` to update `Cargo.lock` (Nix builds with `--locked`)
+3. Commit both files: `git add Cargo.toml Cargo.lock && git commit -m "chore: bump version to vX.Y.Z"`
+4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z\n\n- change 1\n- change 2"`
+5. Push: `git push origin main --tags`
+6. CI builds and creates the GitHub release automatically
+
+**Important:** Always commit `Cargo.lock` after version bumps. Nix uses `--locked` and will fail if `Cargo.lock` doesn't match `Cargo.toml`.
+
 ## Session Preferences
 
 - **Commits:** Do NOT commit unless explicitly asked
