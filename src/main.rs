@@ -55,6 +55,20 @@ struct Cli {
     verbose: u8,
 }
 
+/// Sanitize a string for use as a D-Bus name component and PipeWire node suffix.
+/// Lowercases, replaces non-alphanumeric chars with hyphens, collapses runs, trims.
+fn sanitize_name(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            result.push(c.to_ascii_lowercase());
+        } else if !result.ends_with('-') {
+            result.push('-');
+        }
+    }
+    result.trim_matches('-').to_string()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -139,17 +153,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let gain = cli.gain;
     let ble_name = device.name().await.ok().flatten().unwrap_or_default();
-    #[allow(unused_variables)]
-    let (node_name, dbus_name) = match &cli.name {
-        Some(suffix) => (
-            format!("atvvoice-{suffix}"),
-            format!("org.atvvoice.{suffix}"),
-        ),
-        None => (
-            "atvvoice".to_string(),
-            "org.atvvoice".to_string(),
-        ),
+
+    // Derive instance suffix: explicit --name is validated, auto-derived names are sanitized.
+    let suffix = match cli.name {
+        Some(name) => {
+            let sanitized = sanitize_name(&name);
+            if sanitized != name {
+                eprintln!(
+                    "error: --name {name:?} contains invalid characters. \
+                     Use lowercase alphanumeric and hyphens only (e.g. --name {sanitized:?})."
+                );
+                std::process::exit(1);
+            }
+            name
+        }
+        None => {
+            if !ble_name.is_empty() {
+                sanitize_name(&ble_name)
+            } else {
+                sanitize_name(&device.address().to_string())
+            }
+        }
     };
+    let node_name = format!("atvvoice-{suffix}");
+    #[allow(unused_variables)]
+    let dbus_name = format!("org.atvvoice.{suffix}");
     let node_description = cli.description.unwrap_or_else(|| {
         if ble_name.is_empty() {
             "ATVVoice Microphone".to_string()
