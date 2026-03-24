@@ -72,20 +72,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse optional address filter
     let filter_addr = cli.device.map(|s| s.parse()).transpose()?;
 
-    // Find ATVV device
-    let device = ble::find_atvv_device(&adapter, filter_addr).await?;
+    // Find ATVV device (retries until found)
+    let device = loop {
+        match ble::find_atvv_device(&adapter, filter_addr).await {
+            Ok(device) => break device,
+            Err(e) => {
+                tracing::info!("No ATVV device found ({e}), retrying in 5s...");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    };
     #[cfg(feature = "dbus")]
     let device_addr = device.address().to_string();
 
-    // Ensure connected
-    if !device.is_connected().await? {
-        tracing::info!("Connecting to device...");
-        device.connect().await?;
+    // Connect if needed (retries until connected)
+    async fn ensure_connected(device: &bluer::Device) {
+        loop {
+            match device.is_connected().await {
+                Ok(true) => return,
+                _ => {
+                    tracing::info!("Waiting for device to connect...");
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
     }
+    ensure_connected(&device).await;
 
-    // Resolve GATT characteristics
-    let mut chars = ble::resolve_chars(&device).await?;
-    tracing::info!("ATVV characteristics resolved");
+    // Resolve GATT characteristics (retries on failure)
+    let mut chars = loop {
+        match ble::resolve_chars(&device).await {
+            Ok(c) => {
+                tracing::info!("ATVV characteristics resolved");
+                break c;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to resolve characteristics ({e}), retrying in 2s...");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    };
 
     // Create channels:
     // tokio mpsc: atvv -> decoder bridge
@@ -164,23 +190,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(()) => tracing::info!("Session ended cleanly"),
                     Err(e) => tracing::warn!("Session error: {}", e),
                 }
-                // On disconnect, wait for device to reconnect
+                // Wait for device to reconnect
                 tracing::info!("Waiting for device to reconnect...");
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    if device.is_connected().await.unwrap_or(false) {
-                        tracing::info!("Device reconnected");
-                        break;
-                    }
-                }
+                ensure_connected(&device).await;
+                tracing::info!("Device reconnected");
+
                 // Re-resolve characteristics (handles may change after reconnect)
-                match ble::resolve_chars(&device).await {
-                    Ok(new_chars) => { chars = new_chars; }
-                    Err(e) => {
-                        tracing::error!("Failed to re-resolve characteristics: {}", e);
-                        break;
+                chars = loop {
+                    match ble::resolve_chars(&device).await {
+                        Ok(c) => {
+                            tracing::info!("ATVV characteristics re-resolved");
+                            break c;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to re-resolve characteristics ({e}), retrying in 2s...");
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        }
                     }
-                }
+                };
             }
             _ = &mut ctrl_c => {
                 // Send MIC_CLOSE on graceful shutdown

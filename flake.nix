@@ -123,6 +123,12 @@
             default = 0;
             description = "Log verbosity (0=info, 1=debug, 2+=trace).";
           };
+
+          noDbus = mkOption {
+            type = types.bool;
+            default = false;
+            description = "Disable D-Bus control interface.";
+          };
         };
 
         config = mkIf cfg.enable {
@@ -142,7 +148,8 @@
                 ]
                 ++ lib.optionals (cfg.device != null) ["-d" cfg.device]
                 ++ lib.optionals (cfg.adapter != null) ["-a" cfg.adapter]
-                ++ lib.genList (_: "-v") cfg.verbose;
+                ++ lib.genList (_: "-v") cfg.verbose
+                ++ lib.optionals cfg.noDbus ["--no-dbus"];
             in {
               Type = "simple";
               ExecStart = "${cfg.package}/bin/atvvoice ${lib.escapeShellArgs args}";

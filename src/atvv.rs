@@ -147,12 +147,18 @@ pub async fn run_session(
                                     chars.tx.write(CMD_MIC_OPEN).await?;
                                     tracing::info!("Sent MIC_OPEN");
                                     set_state(State::Opening, &mut state);
+                                    if frame_timeout_enabled {
+                                        frame_timer.as_mut().reset(Instant::now() + timeouts.frame_timeout);
+                                    }
                                 }
                             }
                         } else {
                             chars.tx.write(CMD_MIC_OPEN).await?;
                             tracing::info!("Sent MIC_OPEN");
                             set_state(State::Opening, &mut state);
+                            if frame_timeout_enabled {
+                                frame_timer.as_mut().reset(Instant::now() + timeouts.frame_timeout);
+                            }
                         }
                     }
                     CTL_GET_CAPS_RESP => {
@@ -202,6 +208,9 @@ pub async fn run_session(
                             chars.tx.write(CMD_MIC_OPEN).await?;
                             tracing::info!("Sent MIC_OPEN (external)");
                             set_state(State::Opening, &mut state);
+                            if frame_timeout_enabled {
+                                frame_timer.as_mut().reset(Instant::now() + timeouts.frame_timeout);
+                            }
                         }
                     }
                     ExternalCommand::MicClose => {
@@ -222,6 +231,9 @@ pub async fn run_session(
                             chars.tx.write(CMD_MIC_OPEN).await?;
                             tracing::info!("Sent MIC_OPEN (external toggle)");
                             set_state(State::Opening, &mut state);
+                            if frame_timeout_enabled {
+                                frame_timer.as_mut().reset(Instant::now() + timeouts.frame_timeout);
+                            }
                         }
                     }
                 }
