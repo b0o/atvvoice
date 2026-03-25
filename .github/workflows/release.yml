@@ -96,3 +96,10 @@ jobs:
             atvvoice-aarch64-linux
             *.deb
             *.rpm
+
+      - name: Trigger COPR build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run copr.yml \
+            --field tag=${{ steps.tag.outputs.tag }}
