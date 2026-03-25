@@ -7,7 +7,6 @@ Linux daemon that captures voice audio from BLE TV remotes using the [Android TV
 | Device | Status |
 |--------|--------|
 | G20S Pro / G20S Pro Plus / G20BTS Plus | Verified working |
-| UR02 | Should work, untested |
 | Other ATVV-compatible remotes | Unknown |
 
 If you have a remote you'd like to test, open an issue with the device name, Bluetooth address, and output of `atvvoice -d <ADDR> -vv`. See [docs/research/report.md](docs/research/report.md) for protocol details.
@@ -34,7 +33,7 @@ inputs.atvvoice = {
 ```nix
 imports = [ inputs.atvvoice.homeManagerModules.atvvoice ];
 
-# minimal — auto-detects first ATVV device
+# minimal - auto-detects first ATVV device
 services.atvvoice.enable = true;
 ```
 
@@ -82,10 +81,10 @@ Each ATVVoice instance handles one remote. To use multiple remotes, run separate
 
 ```
 atvvoice -d AA:BB:CC:DD:EE:FF --name living-room &
-atvvoice -d 11:22:33:44:55:66 --name bedroom &
+atvvoice -d 11:22:33:44:55:66 --name office &
 ```
 
-This creates PW nodes `atvvoice-living-room` / `atvvoice-bedroom` and D-Bus names `org.atvvoice.living-room` / `org.atvvoice.bedroom`.
+This creates PW nodes `atvvoice-living-room` / `atvvoice-office` and D-Bus names `org.atvvoice.living-room` / `org.atvvoice.office`.
 
 ## Home Manager options
 
@@ -178,7 +177,7 @@ BLE Remote --[GATT/ATVV]--> atvvoice --[PipeWire]--> Apps
 5. Outputs 8kHz 16-bit mono PCM to a PipeWire virtual source
 6. On device disconnect: removes PipeWire source, waits for reconnect
 
-ATVVoice implements ATVV protocol v0.4, which is the version used by most consumer remotes (G20S Pro, UR02, etc.). The [v1.0 spec](https://web.archive.org/web/20260324183034/https://wangefan.github.io/linux_kernel_driver/resources/Google_Voice_over_BLE_spec_v1.0.pdf) adds PTT/HTT interaction models, headerless audio frames, and stream IDs — these are not yet supported.
+ATVVoice implements ATVV protocol v0.4. The [v1.0 spec](https://web.archive.org/web/20260324183034/https://wangefan.github.io/linux_kernel_driver/resources/Google_Voice_over_BLE_spec_v1.0.pdf) adds PTT/HTT interaction models, headerless audio frames, and stream IDs - these are not yet supported.
 
 See [docs/research/report.md](docs/research/report.md) for the full protocol reverse-engineering writeup and [docs/specs/2026-03-23-atvvoice-design.md](docs/specs/2026-03-23-atvvoice-design.md) for the design spec.
 

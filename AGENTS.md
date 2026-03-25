@@ -1,10 +1,10 @@
-# AGENTS.md — atvvoice
+# AGENTS.md - atvvoice
 
 ## Project Overview
 
 **atvvoice** is a Rust userspace daemon that captures voice audio from BLE TV remotes using the Google Voice over BLE (ATVV) protocol and exposes it as a PipeWire virtual microphone source on Linux.
 
-Target remotes: G20S Pro, UR02, and any ATVV-compatible remote following the Google Reference Design. The daemon is generic — not tied to a specific remote model.
+Target remotes: G20S Pro and any ATVV-compatible remote following the Google Reference Design. The daemon is generic - not tied to a specific remote model.
 
 ## Architecture
 
@@ -14,14 +14,14 @@ BLE Remote <--[BlueZ/D-Bus/GATT]--> atvvoice daemon --[PipeWire virtual source]-
 
 Six modules:
 
-| Module | File | Responsibility |
-|--------|------|---------------|
-| BLE Discovery | `src/ble.rs` | Find ATVV devices, resolve GATT characteristics, AcquireNotify |
-| ATVV Protocol | `src/atvv.rs` | Protocol state machine, commands, frame dispatch |
-| ADPCM Decoder | `src/adpcm.rs` | Pure IMA/DVI ADPCM frame decoder + post-processing |
-| PipeWire Source | `src/pw.rs` | Virtual audio source node (own thread, not async) |
-| D-Bus Control | `src/dbus.rs` | Session bus interface for external mic control (optional feature) |
-| CLI / Main | `src/main.rs` | CLI parsing, tokio runtime, reconnect loop, signal handling |
+| Module          | File           | Responsibility                                                    |
+| --------------- | -------------- | ----------------------------------------------------------------- |
+| BLE Discovery   | `src/ble.rs`   | Find ATVV devices, resolve GATT characteristics, AcquireNotify    |
+| ATVV Protocol   | `src/atvv.rs`  | Protocol state machine, commands, frame dispatch                  |
+| ADPCM Decoder   | `src/adpcm.rs` | Pure IMA/DVI ADPCM frame decoder + post-processing                |
+| PipeWire Source | `src/pw.rs`    | Virtual audio source node (own thread, not async)                 |
+| D-Bus Control   | `src/dbus.rs`  | Session bus interface for external mic control (optional feature) |
+| CLI / Main      | `src/main.rs`  | CLI parsing, tokio runtime, reconnect loop, signal handling       |
 
 ## Tech Stack
 
@@ -41,28 +41,28 @@ Six modules:
 
 Service UUID: `AB5E0001-5A21-4F05-BC7D-AF01F617B664`
 
-| Characteristic | UUID suffix | Direction | Purpose |
-|---|---|---|---|
-| TX | `AB5E0002` | Host → Remote | Commands (write without response) |
-| RX | `AB5E0003` | Remote → Host | Audio data (notify) |
-| CTL | `AB5E0004` | Remote → Host | Control signals (notify) |
+| Characteristic | UUID suffix | Direction     | Purpose                           |
+| -------------- | ----------- | ------------- | --------------------------------- |
+| TX             | `AB5E0002`  | Host → Remote | Commands (write without response) |
+| RX             | `AB5E0003`  | Remote → Host | Audio data (notify)               |
+| CTL            | `AB5E0004`  | Remote → Host | Control signals (notify)          |
 
 ### Commands (Host → Remote, written to TX)
 
-| Command | Bytes | Notes |
-|---|---|---|
-| GET_CAPS | `0x0A 0x00 0x04 0x00 0x01` | Version 0.4, codecs 0x0001 |
-| MIC_OPEN | `0x0C 0x00 0x01` | **Big-endian** codec. `0x01 0x00` is WRONG and gets rejected |
-| MIC_CLOSE | `0x0D` | |
+| Command   | Bytes                      | Notes                                                        |
+| --------- | -------------------------- | ------------------------------------------------------------ |
+| GET_CAPS  | `0x0A 0x00 0x04 0x00 0x01` | Version 0.4, codecs 0x0001                                   |
+| MIC_OPEN  | `0x0C 0x00 0x01`           | **Big-endian** codec. `0x01 0x00` is WRONG and gets rejected |
+| MIC_CLOSE | `0x0D`                     |                                                              |
 
 ### Control Signals (Remote → Host, received on CTL)
 
-| Signal | First byte | Action |
-|---|---|---|
-| AUDIO_STOP | `0x00` | Stop streaming, send MIC_CLOSE |
-| AUDIO_START | `0x04` | Begin streaming |
-| START_SEARCH | `0x08` | Mic button pressed — send MIC_OPEN |
-| GET_CAPS_RESP | `0x0B` | Capabilities response (log only) |
+| Signal        | First byte | Action                             |
+| ------------- | ---------- | ---------------------------------- |
+| AUDIO_STOP    | `0x00`     | Stop streaming, send MIC_CLOSE     |
+| AUDIO_START   | `0x04`     | Begin streaming                    |
+| START_SEARCH  | `0x08`     | Mic button pressed - send MIC_OPEN |
+| GET_CAPS_RESP | `0x0B`     | Capabilities response (log only)   |
 
 ### Session Flow
 
@@ -75,6 +75,7 @@ Service UUID: `AB5E0001-5A21-4F05-BC7D-AF01F617B664`
 7. Send MIC_CLOSE
 
 **Important:** Some remotes send a second START_SEARCH instead of AUDIO_STOP when the mic button is released. The daemon supports two modes via `--mode`:
+
 - **toggle** (default): START_SEARCH while streaming = stop. Next press starts fresh.
 - **hold**: START_SEARCH while streaming = stop + immediate re-open (for remotes with hold-to-talk).
 
@@ -97,6 +98,7 @@ Bytes 6-133: 128 bytes IMA/DVI ADPCM nibbles (high nibble first)
 ### IMA/DVI ADPCM Codec
 
 Standard IMA/DVI ADPCM (Intel 1992 spec):
+
 - 89-entry step table, 8-entry index table (`[-1, -1, -1, -1, 2, 4, 6, 8]`)
 - Nibble format: bit 3 = sign, bits 2-0 = magnitude
 - Diff calculation: `diff = step >> 3; if bit0: += step>>2; if bit1: += step>>1; if bit2: += step`
@@ -107,7 +109,7 @@ Standard IMA/DVI ADPCM (Intel 1992 spec):
 Applied after ADPCM decode, before PipeWire output:
 
 1. **Click removal (declip):** Interpolate single-sample spikes where `|cur-prev| > 1000 AND |cur-next| > 1000 AND min(dp,dn) > |next-prev| * 2`
-2. **Low-pass filter:** 3-tap triangle `[0.25, 0.5, 0.25]` — removes high-freq quantization noise
+2. **Low-pass filter:** 3-tap triangle `[0.25, 0.5, 0.25]` - removes high-freq quantization noise
 3. **Gain:** Fixed dB gain (default 20dB ≈ 10x). Remote mic produces very low-level output.
 
 ## Threading & Channel Architecture
@@ -126,7 +128,7 @@ tokio (single-threaded) ──────────────────�
 
 - `tokio::sync::mpsc` bridges ATVV → decoder (both in tokio)
 - `std::sync::mpsc` bridges decoder → PipeWire (PipeWire has its own non-async main loop)
-- PipeWire MUST run on a separate OS thread — `pipewire-rs` is not tokio-compatible
+- PipeWire MUST run on a separate OS thread - `pipewire-rs` is not tokio-compatible
 
 ## Key Technical Decisions & Gotchas
 
@@ -136,7 +138,7 @@ tokio (single-threaded) ──────────────────�
 
 3. **`bluer::Error` may not have public constructors.** Use `anyhow` or a custom error type for fallible operations in `ble.rs`.
 
-4. **PipeWire `Direction::Output` = audio source.** Confusing but correct — "output" means the stream outputs data TO PipeWire (appearing as a microphone).
+4. **PipeWire `Direction::Output` = audio source.** Confusing but correct - "output" means the stream outputs data TO PipeWire (appearing as a microphone).
 
 5. **`tokio::signal::ctrl_c()` is consumed after first await.** In the reconnection loop, create it outside the loop or re-create each iteration.
 
@@ -148,7 +150,7 @@ tokio (single-threaded) ──────────────────�
 
 9. **PipeWire mono channel position must be set explicitly.** Without `set_position([SPA_AUDIO_CHANNEL_MONO, ...])`, PipeWire defaults to FL (front left) and audio only plays on the left channel.
 
-10. **G20S Pro sends START_SEARCH on both press and release** — it does not maintain a "held" state. Toggle mode is the correct default for this remote.
+10. **G20S Pro sends START_SEARCH on both press and release** - it does not maintain a "held" state. Toggle mode is the correct default for this remote.
 
 11. **Device goes to sleep after inactivity.** Stops sending frames without any CTL signal. The `--frame-timeout` detects this and auto-closes the mic so the next button press works cleanly (no double-press needed).
 
@@ -161,75 +163,77 @@ tokio (single-threaded) ──────────────────�
 - **BLE adapter:** `hci1` (not `hci0`)
 - **Test remote:** G20S Pro at `AA:BB:CC:DD:EE:FF` (already bonded)
 - **Audio stack:** PipeWire (not PulseAudio directly)
-- **Python:** Not directly available — use `nix shell nixpkgs#python3`
+- **Python:** Not directly available - use `nix shell nixpkgs#python3`
 - **Dotfiles:** `/home/boo/dotfiles/` (Nix flake with Home Manager)
 
 ## Build & Test
 
 ```bash
-cargo check          # Type-check
-cargo test           # Run all tests
-cargo test adpcm     # Run ADPCM decoder tests only
-cargo build          # Debug build
-cargo run -- -d AA:BB:CC:DD:EE:FF -v  # Run with test remote
-cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold  # Hold-to-talk mode
-cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300  # With timeouts
-nix build            # Nix build
+cargo check                                                               # Type-check
+cargo test                                                                # Run all tests
+cargo test adpcm                                                          # Run ADPCM decoder tests only
+cargo build                                                               # Debug build
+cargo run -- -d AA:BB:CC:DD:EE:FF -v                                      # Run with test remote
+cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold                              # Hold-to-talk mode
+cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300 # With timeouts
+nix build                                                                 # Nix build
 ```
 
 ## Reference Documents
 
-| Document | Path | Purpose |
-|---|---|---|
-| Design Spec | `docs/specs/2026-03-23-atvvoice-design.md` | Full architecture and protocol spec |
+| Document            | Path                                               | Purpose                                    |
+| ------------------- | -------------------------------------------------- | ------------------------------------------ |
+| Design Spec         | `docs/specs/2026-03-23-atvvoice-design.md`         | Full architecture and protocol spec        |
 | Implementation Plan | `docs/plans/2026-03-23-atvvoice-implementation.md` | Task-by-task build plan with code snippets |
-| Research Report | `docs/research/report.md` | Protocol reverse-engineering findings |
-| Python PoC | `docs/research/scripts/atvv-capture.py` | Working reference implementation |
-| Decode Test | `docs/research/scripts/decode-test.py` | Multi-strategy ADPCM decoder comparison |
+| Research Report     | `docs/research/report.md`                          | Protocol reverse-engineering findings      |
+| Python PoC          | `docs/research/scripts/atvv-capture.py`            | Working reference implementation           |
+| Decode Test         | `docs/research/scripts/decode-test.py`             | Multi-strategy ADPCM decoder comparison    |
 
 ## External References
 
-- [BlueZ issue #1086](https://github.com/bluez/bluez/issues/1086) — Linux support request, protocol research
-- [Infineon CYW20829 Voice Remote](https://github.com/Infineon/mtb-example-btstack-freertos-cyw20829-voice-remote) — Reference firmware (source of truth for frame format)
-- [CSDN ATVV spec translation](https://blog.csdn.net/Weichen_Huang/article/details/109251338) — Command table, characteristic UUIDs
-- [Google Voice over BLE spec v1.0](https://web.archive.org/web/20260324183034/https://wangefan.github.io/linux_kernel_driver/resources/Google_Voice_over_BLE_spec_v1.0.pdf) — Official spec
+- [BlueZ issue #1086](https://github.com/bluez/bluez/issues/1086) - Linux support request, protocol research
+- [Infineon CYW20829 Voice Remote](https://github.com/Infineon/mtb-example-btstack-freertos-cyw20829-voice-remote) - Reference firmware (source of truth for frame format)
+- [CSDN ATVV spec translation](https://blog.csdn.net/Weichen_Huang/article/details/109251338) - Command table, characteristic UUIDs
+- [Google Voice over BLE spec v1.0](https://web.archive.org/web/20260324183034/https://wangefan.github.io/linux_kernel_driver/resources/Google_Voice_over_BLE_spec_v1.0.pdf) - Official spec
 
 ## Implementation Plan
 
 The implementation follows 8 sequential tasks with dependencies. Read `docs/plans/2026-03-23-atvvoice-implementation.md` for full task details with code snippets.
 
-| Task | Description | Dependencies |
-|------|-------------|-------------|
-| 1 | Project scaffold (Cargo.toml, flake.nix, main.rs) | None |
-| 2 | ADPCM decoder module with tests | Task 1 |
-| 3 | BLE discovery module | Task 1 |
-| 4 | ATVV protocol state machine | Tasks 1, 3 |
-| 5 | PipeWire audio source | Task 1 |
-| 6 | Main entry point & integration | Tasks 2, 3, 4, 5 |
-| 7 | Integration test with real hardware | Task 6 |
-| 8 | Nix packaging & Home Manager module | Task 6 |
+| Task | Description                                       | Dependencies     |
+| ---- | ------------------------------------------------- | ---------------- |
+| 1    | Project scaffold (Cargo.toml, flake.nix, main.rs) | None             |
+| 2    | ADPCM decoder module with tests                   | Task 1           |
+| 3    | BLE discovery module                              | Task 1           |
+| 4    | ATVV protocol state machine                       | Tasks 1, 3       |
+| 5    | PipeWire audio source                             | Task 1           |
+| 6    | Main entry point & integration                    | Tasks 2, 3, 4, 5 |
+| 7    | Integration test with real hardware               | Task 6           |
+| 8    | Nix packaging & Home Manager module               | Task 6           |
 
 ## Build & Test
 
 ```bash
-cargo check          # Type-check
-cargo test           # Run all tests
-cargo test adpcm     # Run ADPCM decoder tests only
-cargo build          # Debug build
-cargo run -- -d AA:BB:CC:DD:EE:FF -v  # Run with test remote
-cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold  # Hold-to-talk mode
-cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300  # With timeouts
-nix build            # Nix build
+cargo check                                                               # Type-check
+cargo test                                                                # Run all tests
+cargo test adpcm                                                          # Run ADPCM decoder tests only
+cargo build                                                               # Debug build
+cargo run -- -d AA:BB:CC:DD:EE:FF -v                                      # Run with test remote
+cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold                              # Hold-to-talk mode
+cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300 # With timeouts
+nix build                                                                 # Nix build
 ```
 
 ## CI & Release
 
 **CI** (`.github/workflows/ci.yml`): Runs on push to `main` and PRs.
-- `nix flake check` — evaluates all flake outputs, builds, runs tests
-- `nix build` — builds release binary
-- `nix develop --command cargo test` — runs test suite
+
+- `nix flake check` - evaluates all flake outputs, builds, runs tests
+- `nix build` - builds release binary
+- `nix develop --command cargo test` - runs test suite
 
 **Release** (`.github/workflows/release.yml`): Triggered by `v*` tag push or manual dispatch.
+
 - Builds `x86_64-linux` and `aarch64-linux` binaries via Nix (aarch64 uses QEMU)
 - Creates GitHub release with binaries and auto-generated release notes
 

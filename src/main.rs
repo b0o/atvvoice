@@ -8,7 +8,7 @@ pub mod pw;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "atvvoice", about = "ATVVoice — BLE voice remote microphone daemon")]
+#[command(name = "atvvoice", about = "ATVVoice - BLE voice remote microphone daemon")]
 struct Cli {
     /// Filter by Bluetooth address (e.g., AA:BB:CC:DD:EE:FF)
     #[arg(short, long)]

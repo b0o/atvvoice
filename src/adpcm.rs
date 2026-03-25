@@ -22,7 +22,7 @@ pub const SAMPLES_PER_FRAME: usize = 257;
 /// Decode one 134-byte ATVV audio frame into PCM samples.
 ///
 /// Frame layout:
-///   Bytes 0-1: Sequence ID (big-endian) — returned separately
+///   Bytes 0-1: Sequence ID (big-endian) - returned separately
 ///   Byte 2:    0x00 (padding)
 ///   Bytes 3-4: DVI predictor (big-endian, signed 16-bit)
 ///   Byte 5:    DVI step table index (0-88)
@@ -92,7 +92,7 @@ pub fn declip(samples: &mut [i16]) {
 /// Apply 3-tap triangle low-pass filter \[0.25, 0.5, 0.25\].
 ///
 /// Note: first and last samples pass through unfiltered. This is intentional
-/// for per-frame processing — the predictor at sample[0] provides continuity.
+/// for per-frame processing - the predictor at sample[0] provides continuity.
 pub fn lowpass(samples: &mut [i16]) {
     if samples.len() < 3 {
         return;

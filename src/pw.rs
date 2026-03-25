@@ -50,7 +50,7 @@ pub fn run_pw_source(
 
     let mainloop = MainLoopRc::new(None)?;
 
-    // Shared slot for the stream — set after creation, used by shutdown handler.
+    // Shared slot for the stream - set after creation, used by shutdown handler.
     let stream_slot: std::rc::Rc<std::cell::RefCell<Option<StreamRc>>> =
         std::rc::Rc::new(std::cell::RefCell::new(None));
     let _receiver = shutdown_rx.attach(mainloop.loop_(), {
@@ -195,7 +195,7 @@ pub fn run_pw_source(
 
     // Follow cpal's exact drop pattern: explicitly drop listener and context
     // first, let stream, _receiver, and mainloop drop at function scope end.
-    // Do NOT call pipewire::deinit() — it's process-global and we may create
+    // Do NOT call pipewire::deinit() - it's process-global and we may create
     // another PW thread on reconnect.
     drop(_listener);
     drop(context);

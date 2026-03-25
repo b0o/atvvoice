@@ -132,7 +132,7 @@ pub async fn run_session(
     let frame_timeout_enabled = !timeouts.frame_timeout.is_zero();
 
     // Idle timeout: reset on every START_SEARCH (button press). Detects "user
-    // forgot the mic is on" — auto-closes after configured inactivity period.
+    // forgot the mic is on" - auto-closes after configured inactivity period.
     let idle_timer = time::sleep(timeouts.idle_timeout);
     tokio::pin!(idle_timer);
     let idle_timeout_enabled = !timeouts.idle_timeout.is_zero();
@@ -283,13 +283,13 @@ pub async fn run_session(
                 }
             }
             () = &mut frame_timer, if frame_timeout_enabled && (state == State::Streaming || state == State::Opening) => {
-                tracing::info!("Frame timeout ({:?}) — device likely asleep, closing mic", timeouts.frame_timeout);
+                tracing::info!("Frame timeout ({:?}) - device likely asleep, closing mic", timeouts.frame_timeout);
                 let _ = ble.write_command(CMD_MIC_CLOSE).await;
                 set_state(State::Ready, &mut state);
                 last_seq = None;
             }
             () = &mut idle_timer, if idle_timeout_enabled && (state == State::Streaming || state == State::Opening) => {
-                tracing::info!("Idle timeout ({:?}) — no button activity, closing mic", timeouts.idle_timeout);
+                tracing::info!("Idle timeout ({:?}) - no button activity, closing mic", timeouts.idle_timeout);
                 let _ = ble.write_command(CMD_MIC_CLOSE).await;
                 set_state(State::Ready, &mut state);
                 last_seq = None;
@@ -547,7 +547,7 @@ mod tests {
         assert!(wait_for_state(&mut state_rx, State::Ready, Duration::from_millis(10)).await);
         drain_commands(&mut ctrl.commands_rx).await; // MIC_CLOSE
 
-        // Wait 200ms — timer would have fired if not properly managed (but state is Ready,
+        // Wait 200ms - timer would have fired if not properly managed (but state is Ready,
         // so the guard `if frame_timeout_enabled && (state == Streaming || Opening)` prevents it)
         tokio::time::advance(Duration::from_millis(200)).await;
         assert_eq!(*state_rx.borrow(), State::Ready);

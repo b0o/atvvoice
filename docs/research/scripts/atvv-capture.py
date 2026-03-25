@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""G20S Pro ATVV Voice Capture — captures mic audio and saves to WAV.
+"""G20S Pro ATVV Voice Capture - captures mic audio and saves to WAV.
 
 Implements the Google Voice over BLE (ATVV) protocol with correct
 DVI/IMA ADPCM decoding.

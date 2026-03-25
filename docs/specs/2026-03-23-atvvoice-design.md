@@ -1,4 +1,4 @@
-# atvvoice — Design Spec
+# atvvoice - Design Spec
 
 **Google ATV Voice over BLE daemon for Linux/PipeWire**
 
@@ -8,20 +8,19 @@ and exposes it as a PipeWire virtual microphone source.
 
 ## Background
 
-Google TV voice remotes (G20S Pro, UR02, and many clones following the Google
-Reference Design) have built-in microphones that stream audio over BLE using a
+Google TV voice remotes have built-in microphones that stream audio over BLE using a
 proprietary protocol called "Google Voice over BLE" (ATVV). The protocol uses a
 custom GATT service (`AB5E0001-5A21-4F05-BC7D-AF01F617B664`).
 
 On Android TV, Google's closed-source Katniss framework handles this protocol.
-On Linux, there is no support — BlueZ sees the HID profile (keyboard/mouse) but
+On Linux, there is no support - BlueZ sees the HID profile (keyboard/mouse) but
 ignores the voice service entirely. This daemon fills that gap.
 
 ### Related Work
 
-- [BlueZ issue #1086](https://github.com/bluez/bluez/issues/1086) — open request for Linux support
-- [Infineon CYW20829 Voice Remote](https://github.com/Infineon/mtb-example-btstack-freertos-cyw20829-voice-remote) — reference firmware implementation (source of truth for frame format)
-- `hid-atv-remote.c` — Android kernel driver for older VoHoGP remotes (not applicable; ATVV uses GATT, not HID reports)
+- [BlueZ issue #1086](https://github.com/bluez/bluez/issues/1086) - open request for Linux support
+- [Infineon CYW20829 Voice Remote](https://github.com/Infineon/mtb-example-btstack-freertos-cyw20829-voice-remote) - reference firmware implementation (source of truth for frame format)
+- `hid-atv-remote.c` - Android kernel driver for older VoHoGP remotes (not applicable; ATVV uses GATT, not HID reports)
 
 ## ATVV Protocol
 
@@ -83,14 +82,14 @@ mic button is toggled. The daemon must handle both patterns.
 ```
 
 - **Bytes 0–1**: Sequence number (big-endian, monotonically increasing).
-  On gap detection (missing seq), log a warning and continue — do not
+  On gap detection (missing seq), log a warning and continue - do not
   attempt interpolation.
 - **Byte 2**: Always `0x00` (padding/reserved)
 - **Bytes 3–4**: DVI predictor value (big-endian, signed 16-bit)
 - **Byte 5**: DVI step table index (0–88)
 - **Bytes 6–133**: 128 bytes of IMA/DVI ADPCM nibbles (high nibble decoded first)
 
-Each frame is independently decodable — the decoder resets predictor and
+Each frame is independently decodable - the decoder resets predictor and
 step_index from the DVI header at the start of each frame.
 
 ### Codec
@@ -105,7 +104,7 @@ Standard IMA/DVI ADPCM (Intel 1992 spec):
 
 ```mermaid
 graph LR
-    Remote["BLE Remote<br/>(G20S Pro, UR02, etc)<br/>ab5e0001"]
+    Remote["BLE Remote<br/>ab5e0001"]
     Daemon["atvvoice<br/>─────────<br/>Discovery<br/>ATVV protocol<br/>ADPCM decoder<br/>PW source"]
     Apps["Apps<br/>(STT, Whisper, etc)"]
 
@@ -125,11 +124,11 @@ Responsibilities:
 - Resolve GATT characteristic handles for TX, RX, CTL
 - Provide async streams for GATT notifications
 
-Does NOT handle pairing — assumes device is already bonded via `bluetoothctl`.
+Does NOT handle pairing - assumes device is already bonded via `bluetoothctl`.
 
 On BLE disconnect, re-enters discovery and waits for the device to reconnect.
 Most BLE remotes auto-reconnect when a button is pressed. The daemon does not
-need to restart — it monitors BlueZ device property changes and re-initializes
+need to restart - it monitors BlueZ device property changes and re-initializes
 the ATVV session when the device reconnects.
 
 #### 2. ATVV Protocol State Machine (`atvv.rs`)
@@ -160,7 +159,7 @@ fn decode_frame(frame: &[u8; 134]) -> [i16; 257]
 - Parses 6-byte header (3 app + 3 DVI)
 - Resets predictor and step_index from DVI header per frame
 - Returns 257 samples: the initial predictor value as sample 0, followed by
-  256 decoded samples. All 257 are pushed through the pipeline — the predictor
+  256 decoded samples. All 257 are pushed through the pipeline - the predictor
   IS a valid audio sample (the encoder's output at the frame boundary).
 - Standard IMA step/index tables
 
@@ -232,17 +231,17 @@ atvvoice/
 
 ### Dependencies
 
-- `bluer` — async BlueZ D-Bus bindings
-- `pipewire` — PipeWire client bindings
-- `tokio` — async runtime
-- `clap` — CLI argument parsing
-- `tracing` / `tracing-subscriber` — structured logging
+- `bluer` - async BlueZ D-Bus bindings
+- `pipewire` - PipeWire client bindings
+- `tokio` - async runtime
+- `clap` - CLI argument parsing
+- `tracing` / `tracing-subscriber` - structured logging
 
 ### Nix Module
 
 The flake exports:
-- `packages.default` — the `atvvoice` binary
-- `homeManagerModules.default` — HM module with:
+- `packages.default` - the `atvvoice` binary
+- `homeManagerModules.default` - HM module with:
   - `services.atvvoice.enable`
   - `services.atvvoice.device` (optional BT address filter)
   - `services.atvvoice.gain` (optional gain in dB)
@@ -250,12 +249,12 @@ The flake exports:
 
 ## Non-Goals
 
-- **Pairing/bonding** — use `bluetoothctl` manually
-- **Multiple simultaneous remotes** — single device only (first discovered)
-- **ALSA fallback** — PipeWire only
-- **Opus codec** — ADPCM only (codec 0x0001); Opus support can be added later
-- **16kHz mode** — 8kHz only (matching G20S Pro capabilities)
-- **Android TV emulation** — this is a mic source, not a voice assistant
+- **Pairing/bonding** - use `bluetoothctl` manually
+- **Multiple simultaneous remotes** - single device only (first discovered)
+- **ALSA fallback** - PipeWire only
+- **Opus codec** - ADPCM only (codec 0x0001); Opus support can be added later
+- **16kHz mode** - 8kHz only (matching G20S Pro capabilities)
+- **Android TV emulation** - this is a mic source, not a voice assistant
 
 ## Testing
 

@@ -146,7 +146,7 @@
         config = mkIf cfg.enable {
           systemd.user.services.atvvoice = {
             Unit = {
-              Description = "ATVVoice — BLE voice remote to PipeWire virtual microphone";
+              Description = "ATVVoice - BLE voice remote to PipeWire virtual microphone";
               After = ["pipewire.service"];
               Requires = ["pipewire.service"];
             };
