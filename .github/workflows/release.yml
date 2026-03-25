@@ -102,4 +102,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh workflow run copr.yml \
+            --repo ${{ github.repository }} \
             --field tag=${{ steps.tag.outputs.tag }}
