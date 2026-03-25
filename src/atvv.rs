@@ -10,6 +10,7 @@ use tokio::time::{self, Instant};
 pub const CMD_GET_CAPS: &[u8] = &[0x0A, 0x00, 0x04, 0x00, 0x01];
 pub const CMD_MIC_OPEN: &[u8] = &[0x0C, 0x00, 0x01];
 pub const CMD_MIC_CLOSE: &[u8] = &[0x0D];
+pub const CMD_MIC_EXTEND: &[u8] = &[0x0E, 0x00]; // stream_id 0x00 = MIC_OPEN-initiated
 
 // Control signals (Remote → Host, received on CTL)
 const CTL_AUDIO_STOP: u8 = 0x00;
@@ -49,9 +50,12 @@ pub struct SessionTimeouts {
     /// Auto-close mic if no frames arrive for this long (device went to sleep).
     /// Resets on every received audio frame. 0 = disabled.
     pub frame_timeout: Duration,
-    /// Auto-close mic this long after the last button press (user forgot mic is on).
-    /// Resets on every START_SEARCH. 0 = disabled.
+    /// Auto-close mic this long after the last mic button press (START_SEARCH).
+    /// Does not reset on other remote buttons (volume, navigation, etc.). 0 = disabled.
     pub idle_timeout: Duration,
+    /// Re-send MIC_OPEN at this interval to reset the remote's audio transfer
+    /// timeout (spec §4.6.1). 0 = disabled.
+    pub keepalive: Duration,
 }
 
 /// Events from the device (connection state changes).
@@ -89,6 +93,17 @@ pub trait BleDevice: Send {
 /// External commands (e.g. from D-Bus) are received on `command_rx`.
 /// State changes are broadcast via `state_tx` (for D-Bus signals, etc.).
 /// Returns on device disconnect or unrecoverable error.
+/// Parse a protocol version string like "0.4" or "1.0" into the wire format (e.g. 0x0004, 0x0100).
+pub fn parse_protocol_version(s: &str) -> Result<u16> {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() != 2 {
+        anyhow::bail!("invalid protocol version {s:?}, expected \"major.minor\" (e.g. \"1.0\")");
+    }
+    let major: u8 = parts[0].parse().map_err(|_| anyhow::anyhow!("invalid major version"))?;
+    let minor: u8 = parts[1].parse().map_err(|_| anyhow::anyhow!("invalid minor version"))?;
+    Ok(u16::from_be_bytes([major, minor]))
+}
+
 pub async fn run_session(
     ble: &(impl BleDevice + ?Sized),
     audio_tx: mpsc::Sender<Vec<u8>>,
@@ -96,6 +111,7 @@ pub async fn run_session(
     timeouts: &SessionTimeouts,
     mut command_rx: Option<&mut mpsc::Receiver<ExternalCommand>>,
     state_tx: Option<&tokio::sync::watch::Sender<State>>,
+    protocol_version_override: Option<u16>,
 ) -> Result<()> {
     #[allow(unused_assignments)] // Init is overwritten after GET_CAPS; kept for clarity
     let mut state = State::Init;
@@ -124,6 +140,30 @@ pub async fn run_session(
     set_state(State::Ready, &mut state);
 
     let mut last_seq: Option<u16> = None;
+
+    // MIC_EXTEND (spec v1.0+) is preferred for keepalive: no response, no
+    // stream disruption. Falls back to MIC_OPEN for v0.4 devices.
+    // Determined from CAPS_RESP version or CLI override.
+    let mut use_mic_extend = match protocol_version_override {
+        Some(v) => {
+            let use_extend = v >= 0x0100;
+            tracing::info!(
+                "Protocol version override: 0x{:04x}, MIC_EXTEND: {}",
+                v,
+                if use_extend { "forced on" } else { "forced off" }
+            );
+            use_extend
+        }
+        None => false, // conservative default until CAPS_RESP arrives
+    };
+    let version_overridden = protocol_version_override.is_some();
+
+    // Keepalive: reset the remote's audio transfer timeout (spec §4.6.1)
+    // using MIC_EXTEND (v1.0+) or MIC_OPEN (v0.4 fallback).
+    let keepalive_interval = timeouts.keepalive;
+    let keepalive_enabled = !keepalive_interval.is_zero();
+    let keepalive_timer = time::sleep(keepalive_interval);
+    tokio::pin!(keepalive_timer);
 
     // Frame timeout: reset on every audio frame. Detects device going to sleep
     // so the next button press starts cleanly (no double-press needed).
@@ -155,7 +195,13 @@ pub async fn run_session(
                     }
                     CTL_AUDIO_START => {
                         tracing::info!("AUDIO_START");
+                        // Remote resets its sequence counter on every AUDIO_START
+                        last_seq = None;
                         set_state(State::Streaming, &mut state);
+                        // Reset keepalive timer when streaming starts/restarts
+                        if keepalive_enabled {
+                            keepalive_timer.as_mut().reset(Instant::now() + keepalive_interval);
+                        }
                     }
                     CTL_START_SEARCH => {
                         tracing::info!("START_SEARCH (state={:?}, mode={:?})", state, mic_mode);
@@ -201,6 +247,20 @@ pub async fn run_session(
                     }
                     CTL_GET_CAPS_RESP => {
                         tracing::info!("GET_CAPS_RESP: {:02x?}", &data);
+                        // Parse spec version: bytes 1-2 (big-endian).
+                        // 0x0100 = v1.0 (supports MIC_EXTEND), 0x0004 = v0.4e.
+                        if data.len() >= 3 {
+                            let version = u16::from_be_bytes([data[1], data[2]]);
+                            if !version_overridden {
+                                use_mic_extend = version >= 0x0100;
+                            }
+                            tracing::info!(
+                                "Remote spec version: 0x{:04x}, MIC_EXTEND: {}{}",
+                                version,
+                                if use_mic_extend { "enabled" } else { "disabled" },
+                                if version_overridden { " (overridden)" } else { "" }
+                            );
+                        }
                     }
                     CTL_MIC_OPEN_ERROR => {
                         tracing::warn!("MIC_OPEN_ERROR: {:02x?}", &data);
@@ -281,6 +341,19 @@ pub async fn run_session(
                         }
                     }
                 }
+            }
+            // Keepalive: send MIC_EXTEND (spec v1.0+) or fall back to MIC_OPEN
+            // (spec v0.4) to reset the remote's audio transfer timeout.
+            // MIC_EXTEND is silent; MIC_OPEN triggers AUDIO_START + seq reset.
+            () = &mut keepalive_timer, if keepalive_enabled && state == State::Streaming => {
+                if use_mic_extend {
+                    tracing::debug!("Sending MIC_EXTEND keepalive");
+                    let _ = ble.write_command(CMD_MIC_EXTEND).await;
+                } else {
+                    tracing::debug!("Sending MIC_OPEN keepalive (v0.4 fallback)");
+                    let _ = ble.write_command(CMD_MIC_OPEN).await;
+                }
+                keepalive_timer.as_mut().reset(Instant::now() + keepalive_interval);
             }
             () = &mut frame_timer, if frame_timeout_enabled && (state == State::Streaming || state == State::Opening) => {
                 tracing::info!("Frame timeout ({:?}) - device likely asleep, closing mic", timeouts.frame_timeout);
@@ -501,6 +574,7 @@ mod tests {
         let timeouts = SessionTimeouts {
             frame_timeout: Duration::from_millis(100),
             idle_timeout: Duration::ZERO,
+            keepalive: Duration::ZERO,
         };
 
         let session = tokio::spawn(async move {
@@ -511,6 +585,7 @@ mod tests {
                 &timeouts,
                 None,
                 Some(&state_tx),
+                None,
             )
             .await
         });
@@ -587,6 +662,7 @@ mod tests {
         let timeouts = SessionTimeouts {
             frame_timeout: Duration::ZERO,
             idle_timeout: Duration::ZERO,
+            keepalive: Duration::ZERO,
         };
 
         let session = tokio::spawn(async move {
@@ -597,6 +673,7 @@ mod tests {
                 &timeouts,
                 None,
                 Some(&state_tx),
+                None,
             )
             .await
         });
@@ -652,6 +729,7 @@ mod tests {
         let timeouts = SessionTimeouts {
             frame_timeout: Duration::ZERO,
             idle_timeout: Duration::ZERO,
+            keepalive: Duration::ZERO,
         };
 
         let session = tokio::spawn(async move {
@@ -662,6 +740,7 @@ mod tests {
                 &timeouts,
                 None,
                 Some(&state_tx),
+                None,
             )
             .await
         });
@@ -713,6 +792,7 @@ mod tests {
         let timeouts = SessionTimeouts {
             frame_timeout: Duration::ZERO,
             idle_timeout: Duration::ZERO,
+            keepalive: Duration::ZERO,
         };
 
         let session = tokio::spawn(async move {
@@ -723,6 +803,7 @@ mod tests {
                 &timeouts,
                 None,
                 Some(&state_tx),
+                None,
             )
             .await
         });
@@ -754,6 +835,7 @@ mod tests {
         let timeouts = SessionTimeouts {
             frame_timeout: Duration::ZERO,
             idle_timeout: Duration::ZERO,
+            keepalive: Duration::ZERO,
         };
 
         let session = tokio::spawn(async move {
@@ -764,9 +846,11 @@ mod tests {
                 &timeouts,
                 Some(&mut cmd_rx),
                 Some(&state_tx),
+                None,
             )
             .await
         });
+
 
         tokio::time::advance(Duration::from_millis(1)).await;
         drain_commands(&mut ctrl.commands_rx).await; // GET_CAPS
@@ -831,6 +915,7 @@ mod tests {
         let timeouts = SessionTimeouts {
             frame_timeout: Duration::ZERO,
             idle_timeout: Duration::from_millis(100),
+            keepalive: Duration::ZERO,
         };
 
         let session = tokio::spawn(async move {
@@ -841,6 +926,7 @@ mod tests {
                 &timeouts,
                 None,
                 Some(&state_tx),
+                None,
             )
             .await
         });

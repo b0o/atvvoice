@@ -115,7 +115,19 @@
           idleTimeout = mkOption {
             type = types.nullOr types.int;
             default = null;
-            description = "Seconds since last button press before auto-closing mic. null = app default (0/disabled).";
+            description = "Seconds since last mic button press before auto-closing mic. Only resets on voice/assistant button. null = app default (0/disabled).";
+          };
+
+          keepAlive = mkOption {
+            type = types.nullOr types.int;
+            default = null;
+            description = "Seconds between keepalive messages to prevent the remote's audio transfer timeout. null = app default (10). 0 = disabled.";
+          };
+
+          protocolVersion = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "Override ATVV protocol version (e.g. \"0.4\", \"1.0\"). null = auto-detect from CAPS_RESP.";
           };
 
           verbose = mkOption {
@@ -158,6 +170,8 @@
                 ++ lib.optionals (cfg.mode != null) ["-m" cfg.mode]
                 ++ lib.optionals (cfg.frameTimeout != null) ["--frame-timeout" (toString cfg.frameTimeout)]
                 ++ lib.optionals (cfg.idleTimeout != null) ["--idle-timeout" (toString cfg.idleTimeout)]
+                ++ lib.optionals (cfg.keepAlive != null) ["--keep-alive" (toString cfg.keepAlive)]
+                ++ lib.optionals (cfg.protocolVersion != null) ["--protocol-version" cfg.protocolVersion]
                 ++ lib.optionals (cfg.verbose != null) (lib.genList (_: "-v") cfg.verbose)
                 ++ lib.optionals (cfg.name != null) ["--name" cfg.name]
                 ++ lib.optionals (cfg.description != null) ["--description" cfg.description]

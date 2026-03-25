@@ -30,9 +30,17 @@ struct Cli {
     #[arg(long, default_value = "5")]
     frame_timeout: u64,
 
-    /// Close mic after N seconds since last button press (user inactive). 0 = disabled.
+    /// Close mic after N seconds since last mic button press. 0 = disabled.
     #[arg(short = 't', long, default_value = "0")]
     idle_timeout: u64,
+
+    /// Re-send MIC_OPEN every N seconds to prevent remote's audio transfer timeout. 0 = disabled.
+    #[arg(long, default_value = "10")]
+    keep_alive: u64,
+
+    /// Override remote protocol version (e.g. "0.4", "1.0"). Auto-detected from CAPS_RESP if not set.
+    #[arg(long)]
+    protocol_version: Option<String>,
 
     /// Instance name suffix. Sets PipeWire node name and D-Bus bus name.
     #[arg(short, long)]
@@ -142,7 +150,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let timeouts = atvv::SessionTimeouts {
         frame_timeout: std::time::Duration::from_secs(cli.frame_timeout),
         idle_timeout: std::time::Duration::from_secs(cli.idle_timeout),
+        keepalive: std::time::Duration::from_secs(cli.keep_alive),
     };
+
+    let protocol_version_override = cli
+        .protocol_version
+        .as_deref()
+        .map(atvv::parse_protocol_version)
+        .transpose()?;
 
     // Addresses to skip during auto-discovery (locked by another instance).
     let mut excluded_addrs: Vec<bluer::Address> = Vec::new();
@@ -303,6 +318,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         { None }
                     },
                     Some(&state_tx),
+                    protocol_version_override,
                 ) => result,
                 _ = &mut ctrl_c => {
                     let _ = chars.tx.write(atvv::CMD_MIC_CLOSE).await;

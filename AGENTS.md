@@ -51,9 +51,10 @@ Service UUID: `AB5E0001-5A21-4F05-BC7D-AF01F617B664`
 
 | Command   | Bytes                      | Notes                                                        |
 | --------- | -------------------------- | ------------------------------------------------------------ |
-| GET_CAPS  | `0x0A 0x00 0x04 0x00 0x01` | Version 0.4, codecs 0x0001                                   |
-| MIC_OPEN  | `0x0C 0x00 0x01`           | **Big-endian** codec. `0x01 0x00` is WRONG and gets rejected |
-| MIC_CLOSE | `0x0D`                     |                                                              |
+| GET_CAPS   | `0x0A 0x00 0x04 0x00 0x01` | Version 0.4, codecs 0x0001                                   |
+| MIC_OPEN   | `0x0C 0x00 0x01`           | **Big-endian** codec. `0x01 0x00` is WRONG and gets rejected |
+| MIC_CLOSE  | `0x0D`                     |                                                              |
+| MIC_EXTEND | `0x0E 0x00`                | Reset audio transfer timeout. stream_id=0x00 for MIC_OPEN-initiated streams. No response expected. |
 
 ### Control Signals (Remote → Host, received on CTL)
 

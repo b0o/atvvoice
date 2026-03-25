@@ -87,7 +87,9 @@ atvvoice [OPTIONS]
 | `-g, --gain` | 20 | Audio gain in dB |
 | `-m, --mode` | toggle | `toggle` (press on/off) or `hold` (hold to stream)\* |
 | `--frame-timeout` | 5 | Seconds without frames before auto-closing mic (device asleep). 0 = disabled. |
-| `-t, --idle-timeout` | 0 | Seconds since last button press before auto-closing mic. 0 = disabled. |
+| `-t, --idle-timeout` | 0 | Seconds since last mic button press before auto-closing mic. Only resets on the voice/assistant button, not other remote buttons. 0 = disabled. |
+| `--keep-alive` | 10 | Seconds between keepalive messages to prevent the remote's audio transfer timeout. 0 = disabled. See [Audio keepalive](#audio-keepalive). |
+| `--protocol-version` | auto | Override ATVV protocol version (e.g. `0.4`, `1.0`). Auto-detected from CAPS_RESP if omitted. See [Audio keepalive](#audio-keepalive). |
 | `-n, --name` | | Instance name suffix. Sets PW node and D-Bus name (e.g. `--name living-room`). |
 | `--description` | BLE device name | PipeWire node description (shown in audio settings). Defaults to the remote's BLE name (e.g. "G20S PRO"). |
 | `--no-dbus` | | Disable D-Bus control interface |
@@ -96,6 +98,21 @@ atvvoice [OPTIONS]
 \*Not all remotes support hold-to-stream. The G20S Pro sends a button press event on both press and release, so it only works in toggle mode.
 
 The remote appears by its BLE device name (e.g. "G20S PRO") in PipeWire/PulseAudio audio input settings. The microphone source appears when the device connects and disappears when it disconnects. ATVVoice automatically reconnects when the device comes back.
+
+### Audio keepalive
+
+ATVV remotes have a hardware "Audio Transfer Timeout" (typically 15-60 seconds) to prevent battery drain when the host fails to close the mic. Without intervention, the remote stops streaming after this timeout expires.
+
+ATVVoice sends periodic keepalive messages to reset this timer, allowing audio sessions to run indefinitely. The keepalive method depends on the remote's protocol version:
+
+| Protocol version | Keepalive method | Behavior |
+|-----------------|-----------------|----------|
+| v1.0+ | `MIC_EXTEND` | Silent - no response from remote, no stream disruption |
+| v0.4 | `MIC_OPEN` (fallback) | Remote sends `AUDIO_START` and resets its sequence counter, but audio data continues uninterrupted. |
+
+The protocol version is auto-detected from the remote's `CAPS_RESP` message. Use `--protocol-version` to override if detection is wrong (e.g. `--protocol-version 1.0` to force `MIC_EXTEND`).
+
+Set `--keep-alive 0` to disable keepalive entirely (audio will stop at the remote's hardware timeout, typically ~30 seconds).
 
 ### Multiple remotes
 
@@ -157,9 +174,18 @@ services.atvvoice = {
   # null (default) = 5.
   frameTimeout = 5;
 
-  # Seconds since last button press before auto-closing mic. 0 = disabled.
-  # null (default) = 0.
+  # Seconds since last mic button press before auto-closing mic.
+  # Only resets on the voice/assistant button, not other remote buttons.
+  # 0 = disabled. null (default) = 0.
   idleTimeout = 300;
+
+  # Seconds between keepalive messages. 0 = disabled.
+  # null (default) = 10.
+  keepAlive = 10;
+
+  # Override ATVV protocol version (e.g. "0.4", "1.0").
+  # null (default) = auto-detect from CAPS_RESP.
+  protocolVersion = null;
 
   # Log verbosity: 0 = info, 1 = debug, 2+ = trace. null (default) = 0.
   verbose = 1;
@@ -218,12 +244,14 @@ BLE Remote --[GATT/ATVV]--> atvvoice --[PipeWire]--> Apps
 
 1. Discovers and connects to the remote via BlueZ D-Bus
 2. Subscribes to ATVV GATT notifications (audio + control)
-3. On mic button press: sends MIC_OPEN, receives IMA/DVI ADPCM audio frames
-4. Decodes ADPCM, applies click removal + lowpass filter + gain
-5. Outputs 8kHz 16-bit mono PCM to a PipeWire virtual source
-6. On device disconnect: removes PipeWire source, waits for reconnect
+3. Exchanges capabilities (GET_CAPS / CAPS_RESP) to detect protocol version
+4. On mic button press: sends MIC_OPEN, receives IMA/DVI ADPCM audio frames
+5. Decodes ADPCM, applies click removal + lowpass filter + gain
+6. Outputs 8kHz 16-bit mono PCM to a PipeWire virtual source
+7. Sends periodic keepalive messages (MIC_EXTEND or MIC_OPEN) to prevent the remote's audio transfer timeout
+8. On device disconnect: removes PipeWire source, waits for reconnect
 
-ATVVoice implements ATVV protocol v0.4. The [v1.0 spec](https://web.archive.org/web/20260324183034/https://wangefan.github.io/linux_kernel_driver/resources/Google_Voice_over_BLE_spec_v1.0.pdf) adds PTT/HTT interaction models, headerless audio frames, and stream IDs - these are not yet supported.
+ATVVoice supports ATVV protocol v0.4 and v1.0. The protocol version is auto-detected from the remote's CAPS_RESP. v0.4 devices (like the G20S Pro) use MIC_OPEN as a keepalive fallback; v1.0+ devices use the dedicated MIC_EXTEND command.
 
 See [docs/research/report.md](docs/research/report.md) for the full protocol reverse-engineering writeup and [docs/specs/2026-03-23-atvvoice-design.md](docs/specs/2026-03-23-atvvoice-design.md) for the design spec.
 
