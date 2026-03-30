@@ -94,7 +94,6 @@ atvvoice [OPTIONS]
 | `-d, --device` | auto | Bluetooth address of remote. Auto-detects first ATVV device if omitted. |
 | `-a, --adapter` | auto | BlueZ adapter name |
 | `-g, --gain` | 20 | Audio gain in dB |
-| `-m, --mode` | toggle | `toggle` (press on/off) or `hold` (hold to stream)\* |
 | `--frame-timeout` | 5 | Seconds without frames before auto-closing mic (device asleep). 0 = disabled. |
 | `-t, --idle-timeout` | 0 | Seconds since last mic button press before auto-closing mic. Only resets on the voice/assistant button, not other remote buttons. 0 = disabled. |
 | `--keep-alive` | 10 | Seconds between keepalive messages to prevent the remote's audio transfer timeout. 0 = disabled. See [Audio keepalive](#audio-keepalive). |
@@ -102,8 +101,6 @@ atvvoice [OPTIONS]
 | `--description` | BLE device name | PipeWire node description (shown in audio settings). Defaults to the remote's BLE name (e.g. "G20S PRO"). |
 | `--no-dbus` | | Disable D-Bus control interface |
 | `-v` | off | Verbosity (`-v` debug, `-vv` trace) |
-
-\*Not all remotes support hold-to-stream. The G20S Pro sends a button press event on both press and release, so it only works in toggle mode.
 
 The remote appears by its BLE device name (e.g. "G20S PRO") in PipeWire/PulseAudio audio input settings. The microphone source appears when the device connects and disappears when it disconnects. ATVVoice automatically reconnects when the device comes back.
 
@@ -173,10 +170,6 @@ services.atvvoice = {
 
   # Audio gain in dB. null (default) = 20.
   gain = 20;
-
-  # "toggle" = press on/off. "hold" = hold to stream.
-  # Not all remotes support hold mode. null (default) = toggle.
-  mode = "toggle";
 
   # Seconds without audio frames before auto-closing mic. 0 = disabled.
   # null (default) = 5.

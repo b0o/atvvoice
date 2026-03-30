@@ -85,10 +85,7 @@ Service UUID: `AB5E0001-5A21-4F05-BC7D-AF01F617B664`
 8. User releases mic → AUDIO_STOP (or second START_SEARCH)
 9. Send MIC_CLOSE
 
-**Important:** Some remotes send a second START_SEARCH instead of AUDIO_STOP when the mic button is released. The daemon supports two modes via `--mode`:
-
-- **toggle** (default): START_SEARCH while streaming = stop. Next press starts fresh.
-- **hold**: START_SEARCH while streaming = stop + immediate re-open (for remotes with hold-to-talk).
+**Important:** Some v0.4 remotes (like the G20S Pro) send a second START_SEARCH instead of AUDIO_STOP when the mic button is released. The daemon treats START_SEARCH while streaming as a toggle-off (sends MIC_CLOSE). v1.0 remotes with HTT (Hold-to-Talk) send AUDIO_STOP with reason `HttButtonRelease` on release, which the daemon handles without sending MIC_CLOSE (the remote already stopped).
 
 ### Audio Frame Format (134 bytes)
 
@@ -161,7 +158,7 @@ tokio (single-threaded) ──────────────────�
 
 9. **PipeWire mono channel position must be set explicitly.** Without `set_position([SPA_AUDIO_CHANNEL_MONO, ...])`, PipeWire defaults to FL (front left) and audio only plays on the left channel.
 
-10. **G20S Pro sends START_SEARCH on both press and release** - it does not maintain a "held" state. Toggle mode is the correct default for this remote.
+10. **G20S Pro sends START_SEARCH on both press and release** - it does not maintain a "held" state. START_SEARCH while streaming always toggles the mic off.
 
 11. **Device goes to sleep after inactivity.** Stops sending frames without any CTL signal. The `--frame-timeout` detects this and auto-closes the mic so the next button press works cleanly (no double-press needed).
 
@@ -187,7 +184,6 @@ cargo test                                                                # Run 
 cargo test adpcm                                                          # Run ADPCM decoder tests only
 cargo build                                                               # Debug build
 cargo run -- -d AA:BB:CC:DD:EE:FF -v                                      # Run with test remote
-cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold                              # Hold-to-talk mode
 cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300 # With timeouts
 nix build                                                                 # Nix build
 ```
@@ -199,7 +195,6 @@ nix develop --command cargo check                                               
 nix develop --command cargo test                                                                # Run all tests
 nix develop --command cargo clippy --tests -- -W clippy::all                                    # Lint
 nix develop --command cargo run -- -d AA:BB:CC:DD:EE:FF -v                                      # Run with test remote
-nix develop --command cargo run -- -d AA:BB:CC:DD:EE:FF -v -m hold                              # Hold-to-talk mode
 nix develop --command cargo run -- -d AA:BB:CC:DD:EE:FF -v --frame-timeout 5 --idle-timeout 300 # With timeouts
 nix build                                                                                       # Nix build
 ```

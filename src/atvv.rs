@@ -9,15 +9,6 @@ use tokio::time::{self, Instant};
 use crate::protocol::types::{AudioFrame, AudioStopReason, CtlEvent, StreamId};
 use crate::protocol::Protocol;
 
-/// How the mic button behaves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum MicMode {
-    /// Press to start, press again to stop (for remotes that toggle).
-    Toggle,
-    /// Hold to stream, release to stop (for remotes that send AUDIO_STOP on release).
-    Hold,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Disconnected,
@@ -100,7 +91,6 @@ pub trait BleDevice: Send {
 /// Configuration and channels for a session.
 pub struct SessionConfig<'a> {
     pub audio_tx: mpsc::Sender<AudioFrame>,
-    pub mic_mode: MicMode,
     pub timeouts: &'a SessionTimeouts,
     pub command_rx: Option<&'a mut mpsc::Receiver<ExternalCommand>>,
     pub state_tx: Option<&'a tokio::sync::watch::Sender<State>>,
@@ -126,7 +116,6 @@ pub async fn run_session(
 ) -> Result<()> {
     let SessionConfig {
         audio_tx,
-        mic_mode,
         timeouts,
         mut command_rx,
         state_tx,
@@ -219,7 +208,7 @@ pub async fn run_session(
                         }
                     }
                     CtlEvent::StartSearch => {
-                        tracing::info!("START_SEARCH (state={:?}, mode={:?})", state, mic_mode);
+                        tracing::info!("START_SEARCH (state={:?})", state);
 
                         // Reset idle timer on user activity (button press)
                         if idle_timeout_enabled {
@@ -227,27 +216,11 @@ pub async fn run_session(
                         }
 
                         if state == State::Streaming || state == State::Opening {
+                            // Toggle: second press stops streaming
                             let sid = current_stream_id.unwrap_or(StreamId::MIC_OPEN);
-                            match mic_mode {
-                                MicMode::Toggle => {
-                                    // Toggle: second press stops streaming
-                                    ble.write_command(&protocol.mic_close_cmd(sid)).await?;
-                                    tracing::info!("Sent MIC_CLOSE (toggle off)");
-                                    close_mic_reset!(state, last_seq, current_stream_id);
-                                }
-                                MicMode::Hold => {
-                                    // Hold: second `START_SEARCH` while streaming = stop + re-open
-                                    ble.write_command(&protocol.mic_close_cmd(sid)).await?;
-                                    tracing::info!("Sent MIC_CLOSE (re-open)");
-                                    close_mic_reset!(state, last_seq, current_stream_id);
-                                    ble.write_command(&protocol.mic_open_cmd()).await?;
-                                    tracing::info!("Sent MIC_OPEN");
-                                    set_state(State::Opening, &mut state);
-                                    if frame_timeout_enabled {
-                                        frame_timer.as_mut().reset(Instant::now() + timeouts.frame_timeout);
-                                    }
-                                }
-                            }
+                            ble.write_command(&protocol.mic_close_cmd(sid)).await?;
+                            tracing::info!("Sent MIC_CLOSE (toggle off)");
+                            close_mic_reset!(state, last_seq, current_stream_id);
                         } else {
                             ble.write_command(&protocol.mic_open_cmd()).await?;
                             tracing::info!("Sent MIC_OPEN");
@@ -579,7 +552,7 @@ mod tests {
                 streams,
                 SessionConfig {
                     audio_tx,
-                    mic_mode: MicMode::Toggle,
+
                     timeouts: &timeouts,
                     command_rx: None,
                     state_tx: Some(&state_tx),
@@ -681,7 +654,7 @@ mod tests {
                 streams,
                 SessionConfig {
                     audio_tx,
-                    mic_mode: MicMode::Toggle,
+
                     timeouts: &timeouts,
                     command_rx: None,
                     state_tx: Some(&state_tx),
@@ -727,86 +700,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ── Test 3: Hold mode state transitions ─────────────────────────────
-
-    #[tokio::test]
-    async fn test_hold_mode_state_transitions() {
-        tokio::time::pause();
-
-        let (device, mut ctrl) = mock_device();
-        let (audio_tx, _audio_rx) = tokio_mpsc::channel(64);
-        let (state_tx, mut state_rx) = tokio::sync::watch::channel(State::Connected);
-
-        let timeouts = SessionTimeouts {
-            frame_timeout: Duration::ZERO,
-            idle_timeout: Duration::ZERO,
-            keepalive: Duration::ZERO,
-        };
-
-        let caps = Capabilities {
-            version: ProtocolVersion::V0_4,
-            codecs: Codecs::ADPCM_8KHZ,
-            interaction_model: InteractionModel::OnRequest,
-            audio_frame_size: AudioFrameSize(134),
-        };
-        let mut protocol = ProtocolV04::new();
-        protocol.on_caps_resp(&caps).unwrap();
-
-        let ctl = device.ctl_notifications().await.unwrap();
-        let rx = device.rx_notifications().await.unwrap();
-        let events = device.connection_events().await.unwrap();
-        let streams = BleStreams { ctl, rx, events };
-
-        let session = tokio::spawn(async move {
-            run_session(
-                &device,
-                &mut protocol,
-                streams,
-                SessionConfig {
-                    audio_tx,
-                    mic_mode: MicMode::Hold,
-                    timeouts: &timeouts,
-                    command_rx: None,
-                    state_tx: Some(&state_tx),
-                },
-            )
-            .await
-        });
-
-        tokio::time::advance(Duration::from_millis(1)).await;
-        assert!(wait_for_state(&mut state_rx, State::Connected, Duration::from_millis(10)).await);
-
-        // START_SEARCH from Ready → Opening, MIC_OPEN sent
-        ctrl.ctl_tx.send(vec![CTL_START_SEARCH]).unwrap();
-        tokio::time::advance(Duration::from_millis(1)).await;
-        assert!(wait_for_state(&mut state_rx, State::Opening, Duration::from_millis(10)).await);
-        let cmds = try_recv_all_commands(&mut ctrl.commands_rx).await;
-        assert_eq!(cmds, vec![V04_MIC_OPEN.to_vec()]);
-
-        // AUDIO_START → Streaming
-        ctrl.ctl_tx.send(vec![CTL_AUDIO_START]).unwrap();
-        tokio::time::advance(Duration::from_millis(1)).await;
-        assert!(wait_for_state(&mut state_rx, State::Streaming, Duration::from_millis(10)).await);
-
-        // START_SEARCH from Streaming in hold mode → MIC_CLOSE then MIC_OPEN, state=Opening
-        ctrl.ctl_tx.send(vec![CTL_START_SEARCH]).unwrap();
-        tokio::time::advance(Duration::from_millis(1)).await;
-        assert!(wait_for_state(&mut state_rx, State::Opening, Duration::from_millis(10)).await);
-        let cmds = try_recv_all_commands(&mut ctrl.commands_rx).await;
-        assert_eq!(
-            cmds,
-            vec![V04_MIC_CLOSE.to_vec(), V04_MIC_OPEN.to_vec()]
-        );
-
-        // Clean up
-        ctrl.event_tx
-            .send(DeviceConnectionEvent::Disconnected)
-            .unwrap();
-        let result = session.await.unwrap();
-        assert!(result.is_ok());
-    }
-
-    // ── Test 4: Disconnect detection ────────────────────────────────────
+    // ── Test 3: Disconnect detection ────────────────────────────────────
 
     #[tokio::test]
     async fn test_disconnect_detection() {
@@ -843,7 +737,7 @@ mod tests {
                 streams,
                 SessionConfig {
                     audio_tx,
-                    mic_mode: MicMode::Toggle,
+
                     timeouts: &timeouts,
                     command_rx: None,
                     state_tx: Some(&state_tx),
@@ -903,7 +797,7 @@ mod tests {
                 streams,
                 SessionConfig {
                     audio_tx,
-                    mic_mode: MicMode::Toggle,
+
                     timeouts: &timeouts,
                     command_rx: Some(&mut cmd_rx),
                     state_tx: Some(&state_tx),
@@ -998,7 +892,7 @@ mod tests {
                 streams,
                 SessionConfig {
                     audio_tx,
-                    mic_mode: MicMode::Toggle,
+
                     timeouts: &timeouts,
                     command_rx: None,
                     state_tx: Some(&state_tx),
@@ -1090,7 +984,7 @@ mod tests {
                 streams,
                 SessionConfig {
                     audio_tx,
-                    mic_mode: MicMode::Toggle,
+
                     timeouts: &timeouts,
                     command_rx: None,
                     state_tx: Some(&state_tx),

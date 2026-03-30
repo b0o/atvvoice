@@ -37,10 +37,6 @@ struct Cli {
     #[arg(short, long, default_value = "20")]
     gain: f32,
 
-    /// Mic button mode: "toggle" (press on/off) or "hold" (hold to stream)
-    #[arg(short, long, value_enum, default_value = "toggle")]
-    mode: atvv::MicMode,
-
     /// Close mic after N seconds without audio frames (device asleep). 0 = disabled.
     #[arg(long, default_value = "5")]
     frame_timeout: u64,
@@ -402,7 +398,6 @@ async fn main() -> anyhow::Result<()> {
                     streams,
                     atvv::SessionConfig {
                         audio_tx: frame_tx,
-                        mic_mode: cli.mode,
                         timeouts: &timeouts,
                         command_rx: {
                             #[cfg(feature = "dbus")]

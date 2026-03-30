@@ -100,12 +100,6 @@
             description = "Audio gain in dB. null = app default (20).";
           };
 
-          mode = mkOption {
-            type = types.nullOr (types.enum ["toggle" "hold"]);
-            default = null;
-            description = "Mic button mode. null = app default (toggle).";
-          };
-
           frameTimeout = mkOption {
             type = types.nullOr types.int;
             default = null;
@@ -161,7 +155,6 @@
                 lib.optionals (cfg.device != null) ["-d" cfg.device]
                 ++ lib.optionals (cfg.adapter != null) ["-a" cfg.adapter]
                 ++ lib.optionals (cfg.gain != null) ["-g" (toString cfg.gain)]
-                ++ lib.optionals (cfg.mode != null) ["-m" cfg.mode]
                 ++ lib.optionals (cfg.frameTimeout != null) ["--frame-timeout" (toString cfg.frameTimeout)]
                 ++ lib.optionals (cfg.idleTimeout != null) ["--idle-timeout" (toString cfg.idleTimeout)]
                 ++ lib.optionals (cfg.keepAlive != null) ["--keep-alive" (toString cfg.keepAlive)]
