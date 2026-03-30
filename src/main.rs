@@ -466,7 +466,9 @@ async fn main() -> anyhow::Result<()> {
             // finishes naturally. Await it for a clean shutdown instead of aborting.
             let _ = pw_shutdown_tx.send(pw::Shutdown);
             let _ = decoder_handle.await;
-            let _ = pw_thread.join();
+            if let Err(panic) = pw_thread.join() {
+                tracing::error!("PipeWire thread panicked: {panic:?}");
+            }
 
             match &session_result {
                 Ok(()) => tracing::info!("Session ended"),

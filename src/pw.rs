@@ -282,7 +282,11 @@ pub fn run_pw_source(
                 if count != last_count.get() {
                     last_count.set(count);
                     tracing::debug!("PipeWire consumer count: {count}");
-                    let _ = consumer_tx.try_send(crate::consumer::ConsumerEvent::Changed(count));
+                    if let Err(e) =
+                        consumer_tx.try_send(crate::consumer::ConsumerEvent::Changed(count))
+                    {
+                        tracing::warn!("Consumer event dropped: {e}");
+                    }
                 }
             }
         };
@@ -300,10 +304,10 @@ pub fn run_pw_source(
                     match global.type_ {
                         ObjectType::Node => {
                             // Bind Stream/Input/Audio nodes to get their full info.
-                            let dominated_by_pulse =
+                            let is_audio_input =
                                 global.props.as_ref().and_then(|p| p.get("media.class"))
                                     == Some("Stream/Input/Audio");
-                            if !dominated_by_pulse {
+                            if !is_audio_input {
                                 return;
                             }
                             let node_id = global.id;
