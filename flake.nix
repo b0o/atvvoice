@@ -124,12 +124,6 @@
             description = "Seconds between keepalive messages to prevent the remote's audio transfer timeout. null = app default (10). 0 = disabled.";
           };
 
-          protocolVersion = mkOption {
-            type = types.nullOr types.str;
-            default = null;
-            description = "Override ATVV protocol version (e.g. \"0.4\", \"1.0\"). null = auto-detect from CAPS_RESP.";
-          };
-
           verbose = mkOption {
             type = types.nullOr (types.ints.between 0 3);
             default = null;
@@ -171,7 +165,6 @@
                 ++ lib.optionals (cfg.frameTimeout != null) ["--frame-timeout" (toString cfg.frameTimeout)]
                 ++ lib.optionals (cfg.idleTimeout != null) ["--idle-timeout" (toString cfg.idleTimeout)]
                 ++ lib.optionals (cfg.keepAlive != null) ["--keep-alive" (toString cfg.keepAlive)]
-                ++ lib.optionals (cfg.protocolVersion != null) ["--protocol-version" cfg.protocolVersion]
                 ++ lib.optionals (cfg.verbose != null) (lib.genList (_: "-v") cfg.verbose)
                 ++ lib.optionals (cfg.name != null) ["--name" cfg.name]
                 ++ lib.optionals (cfg.description != null) ["--description" cfg.description]

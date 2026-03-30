@@ -251,7 +251,7 @@ BLE Remote --[GATT/ATVV]--> atvvoice --[PipeWire]--> Apps
 3. Exchanges capabilities (GET_CAPS / CAPS_RESP) to detect protocol version
 4. On mic button press: sends MIC_OPEN, receives IMA/DVI ADPCM audio frames
 5. Decodes ADPCM, applies click removal + lowpass filter + gain
-6. Outputs 8kHz 16-bit mono PCM to a PipeWire virtual source
+6. Outputs 8kHz or 16kHz 16-bit mono PCM to a PipeWire virtual source (matches negotiated codec)
 7. Sends periodic keepalive messages (MIC_EXTEND or MIC_OPEN) to prevent the remote's audio transfer timeout
 8. On device disconnect: removes PipeWire source, waits for reconnect
 

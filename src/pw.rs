@@ -21,9 +21,6 @@ use pipewire::spa::pod::{Object, Pod, Value};
 use pipewire::spa::utils::{Direction, SpaTypes};
 use pipewire::stream::{Stream, StreamFlags, StreamRc};
 
-/// Sample rate for ATVV audio (8 kHz mono).
-const SAMPLE_RATE: u32 = 8000;
-
 /// Number of audio channels (mono).
 const CHANNELS: u32 = 1;
 
@@ -42,6 +39,7 @@ pub struct Shutdown;
 pub fn run_pw_source(
     audio_rx: mpsc::Receiver<Vec<i16>>,
     gain_db: f32,
+    sample_rate: u32,
     node_name: &str,
     node_description: &str,
     shutdown_rx: pipewire::channel::Receiver<Shutdown>,
@@ -159,7 +157,7 @@ pub fn run_pw_source(
     // Build the SPA audio format pod for format negotiation.
     let mut audio_info = AudioInfoRaw::new();
     audio_info.set_format(AudioFormat::S16LE);
-    audio_info.set_rate(SAMPLE_RATE);
+    audio_info.set_rate(sample_rate);
     audio_info.set_channels(CHANNELS);
 
     let mut position = [0u32; 64];
@@ -171,13 +169,11 @@ pub fn run_pw_source(
         id: ParamType::EnumFormat.as_raw(),
         properties: audio_info.into(),
     };
-    let values: Vec<u8> = PodSerializer::serialize(
-        io::Cursor::new(Vec::new()),
-        &Value::Object(obj),
-    )
-    .expect("failed to serialize audio format pod")
-    .0
-    .into_inner();
+    let values: Vec<u8> =
+        PodSerializer::serialize(io::Cursor::new(Vec::new()), &Value::Object(obj))
+            .expect("failed to serialize audio format pod")
+            .0
+            .into_inner();
 
     let mut params = [Pod::from_bytes(&values).expect("invalid pod bytes")];
 
@@ -188,7 +184,10 @@ pub fn run_pw_source(
         &mut params,
     )?;
 
-    tracing::info!("PipeWire source running (8kHz S16LE mono, gain={gain_db}dB)");
+    tracing::info!(
+        "PipeWire source running ({}kHz S16LE mono, gain={gain_db}dB)",
+        sample_rate / 1000
+    );
 
     // Block until quit.
     mainloop.run();

@@ -279,5 +279,4 @@ The implementation follows 8 sequential tasks with dependencies. Read `docs/plan
 - Multiple simultaneous remotes
 - ALSA fallback (PipeWire only)
 - Opus codec (ADPCM only, codec 0x0001)
-- 16kHz mode (8kHz only)
 - Android TV emulation

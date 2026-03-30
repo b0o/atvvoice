@@ -340,7 +340,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
             };
-            tracing::info!("Negotiated protocol: {} ({:?})", caps.version, caps.codecs);
+            let codec = match protocol::negotiate_codec(caps.codecs) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Codec negotiation failed: {e}");
+                    continue;
+                }
+            };
+            tracing::info!("Negotiated protocol: {} ({:?}, {}Hz)", caps.version, codec, codec.sample_rate());
             let _ = state_tx.send(atvv::State::Connected);
             let mut session_protocol = match protocol::create_protocol(&caps) {
                 Ok(p) => p,
@@ -350,6 +357,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
+            let sample_rate = codec.sample_rate();
             let (frame_tx, mut frame_rx) =
                 tokio::sync::mpsc::channel::<protocol::types::AudioFrame>(64);
             let (pcm_tx, pcm_rx) = std::sync::mpsc::channel::<Vec<i16>>();
@@ -360,7 +368,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pw_desc = node_description.clone();
             let pw_thread = std::thread::spawn(move || {
                 if let Err(e) =
-                    pw::run_pw_source(pcm_rx, gain, &pw_name, &pw_desc, pw_shutdown_rx)
+                    pw::run_pw_source(pcm_rx, gain, sample_rate, &pw_name, &pw_desc, pw_shutdown_rx)
                 {
                     tracing::error!("PipeWire error: {}", e);
                 }
