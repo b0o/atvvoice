@@ -1,12 +1,10 @@
 /// IMA/DVI ADPCM step size table (89 entries).
 const STEP_TABLE: [i32; 89] = [
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37,
-    41, 45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173,
-    190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
-    724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
-    2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894,
-    6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289,
-    16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
+    73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449,
+    494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272,
+    2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493,
+    10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
 ];
 
 /// IMA/DVI ADPCM index adjustment table.
@@ -19,6 +17,72 @@ pub const FRAME_SIZE: usize = 134;
 /// 1 (predictor) + 256 (128 bytes × 2 nibbles).
 pub const SAMPLES_PER_FRAME: usize = 257;
 
+/// Maximum valid step table index (STEP_TABLE has 89 entries, indexed 0..=88).
+const MAX_STEP_INDEX: u8 = 88;
+
+/// Stateful IMA/DVI ADPCM decoder.
+///
+/// Used by Protocol implementations. State can be reset per-frame (v0.4)
+/// or persist across frames with periodic AUDIO_SYNC resets (v1.0).
+#[derive(Default)]
+pub struct AdpcmDecoder {
+    pub predictor: i16,
+    pub step_index: u8,
+}
+
+impl AdpcmDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Reset decoder state. Step index is clamped to 0..=88.
+    pub fn reset(&mut self, predictor: i16, step_index: u8) {
+        self.predictor = predictor;
+        self.step_index = step_index.min(MAX_STEP_INDEX);
+    }
+
+    /// Decode a single 4-bit ADPCM nibble. Updates internal state.
+    pub fn decode_nibble(&mut self, nibble: u8) -> i16 {
+        let step = STEP_TABLE[self.step_index as usize];
+        let mut diff = step >> 3;
+        if nibble & 1 != 0 {
+            diff += step >> 2;
+        }
+        if nibble & 2 != 0 {
+            diff += step >> 1;
+        }
+        if nibble & 4 != 0 {
+            diff += step;
+        }
+
+        let mut pred = self.predictor as i32;
+        if nibble & 8 != 0 {
+            pred -= diff;
+        } else {
+            pred += diff;
+        }
+        pred = pred.clamp(i16::MIN as i32, i16::MAX as i32);
+        self.predictor = pred as i16;
+
+        let mut si = self.step_index as i32;
+        si += INDEX_TABLE[(nibble & 7) as usize];
+        si = si.clamp(0, MAX_STEP_INDEX as i32);
+        self.step_index = si as u8;
+
+        self.predictor
+    }
+
+    /// Decode ADPCM bytes (high nibble first). Returns 2 samples per byte.
+    pub fn decode_bytes(&mut self, data: &[u8]) -> Vec<i16> {
+        let mut samples = Vec::with_capacity(data.len() * 2);
+        for &byte in data {
+            samples.push(self.decode_nibble(byte >> 4));
+            samples.push(self.decode_nibble(byte & 0x0F));
+        }
+        samples
+    }
+}
+
 /// Decode one 134-byte ATVV audio frame into PCM samples.
 ///
 /// Frame layout:
@@ -29,43 +93,22 @@ pub const SAMPLES_PER_FRAME: usize = 257;
 ///   Bytes 6-133: 128 bytes IMA ADPCM (high nibble first)
 ///
 /// Returns (sequence_number, pcm_samples).
+///
+/// This is a convenience wrapper around `AdpcmDecoder` that preserves
+/// the original API. Use `AdpcmDecoder` directly for v1.0 headerless frames.
 pub fn decode_frame(frame: &[u8; FRAME_SIZE]) -> (u16, [i16; SAMPLES_PER_FRAME]) {
     let seq = u16::from_be_bytes([frame[0], frame[1]]);
-    let mut predictor = i16::from_be_bytes([frame[3], frame[4]]) as i32;
-    let mut step_index = frame[5].min(88) as i32;
+    let predictor = i16::from_be_bytes([frame[3], frame[4]]);
+    let step_index = frame[5];
+
+    let mut decoder = AdpcmDecoder::new();
+    decoder.reset(predictor, step_index);
 
     let mut samples = [0i16; SAMPLES_PER_FRAME];
-    samples[0] = predictor as i16;
+    samples[0] = decoder.predictor;
 
-    let mut sample_idx = 1;
-    for &byte in &frame[6..] {
-        // High nibble first
-        for nibble in [(byte >> 4) & 0x0F, byte & 0x0F] {
-            let step = STEP_TABLE[step_index as usize];
-            let mut diff = step >> 3;
-            if nibble & 1 != 0 {
-                diff += step >> 2;
-            }
-            if nibble & 2 != 0 {
-                diff += step >> 1;
-            }
-            if nibble & 4 != 0 {
-                diff += step;
-            }
-            if nibble & 8 != 0 {
-                predictor -= diff;
-            } else {
-                predictor += diff;
-            }
-            predictor = predictor.clamp(-32768, 32767);
-
-            step_index += INDEX_TABLE[(nibble & 7) as usize];
-            step_index = step_index.clamp(0, 88);
-
-            samples[sample_idx] = predictor as i16;
-            sample_idx += 1;
-        }
-    }
+    let decoded = decoder.decode_bytes(&frame[6..]);
+    samples[1..].copy_from_slice(&decoded);
 
     (seq, samples)
 }
@@ -112,7 +155,7 @@ pub fn apply_gain(samples: &mut [i16], gain_db: f32) {
     let gain = 10f32.powf(gain_db / 20.0);
     for s in samples.iter_mut() {
         let amplified = (*s as f32 * gain).round() as i32;
-        *s = amplified.clamp(-32768, 32767) as i16;
+        *s = amplified.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
     }
 }
 
@@ -197,7 +240,7 @@ mod tests {
                 } else {
                     pred += predicted_diff;
                 }
-                pred = pred.clamp(-32768, 32767);
+                pred = pred.clamp(i16::MIN as i32, i16::MAX as i32);
 
                 step_index += INDEX_TABLE[(nibble & 7) as usize];
                 step_index = step_index.clamp(0, 88);
@@ -238,10 +281,7 @@ mod tests {
         }
 
         let snr_db = 10.0 * (signal_power / noise_power).log10();
-        assert!(
-            snr_db > 20.0,
-            "SNR should be > 20dB, got {snr_db:.1}dB"
-        );
+        assert!(snr_db > 20.0, "SNR should be > 20dB, got {snr_db:.1}dB");
     }
 
     #[test]
@@ -254,7 +294,7 @@ mod tests {
         frame[3] = 0x00; // predictor high
         frame[4] = 0x00; // predictor low = 0
         frame[5] = 0x00; // step_index = 0
-        // bytes 6..133 already zero (all-zero nibbles)
+                         // bytes 6..133 already zero (all-zero nibbles)
 
         let (seq, samples) = decode_frame(&frame);
 
@@ -265,10 +305,7 @@ mod tests {
         // With step_index decreasing by 1 (INDEX_TABLE[0]=-1), clamped to 0
         // All samples should be very close to 0
         for (i, &s) in samples.iter().enumerate() {
-            assert!(
-                s.abs() <= 5,
-                "Sample {i} should be near-silent, got {s}"
-            );
+            assert!(s.abs() <= 5, "Sample {i} should be near-silent, got {s}");
         }
     }
 
@@ -356,10 +393,10 @@ mod tests {
         let (seq, samples) = decode_frame(&frame);
 
         assert_eq!(seq, 7);
-        assert_eq!(samples[0], 1000);  // predictor
-        assert_eq!(samples[1], 1043);  // after nibble 0x3
-        assert_eq!(samples[2], 1104);  // after nibble 0x5
-        assert_eq!(samples[3], 1080);  // after nibble 0x9
+        assert_eq!(samples[0], 1000); // predictor
+        assert_eq!(samples[1], 1043); // after nibble 0x3
+        assert_eq!(samples[2], 1104); // after nibble 0x5
+        assert_eq!(samples[3], 1080); // after nibble 0x9
     }
 
     #[test]
@@ -380,7 +417,10 @@ mod tests {
         // A single-sample spike surrounded by low values should be interpolated
         let mut samples: Vec<i16> = vec![0, 0, 5000, 0, 0];
         declip(&mut samples);
-        assert_eq!(samples[2], 0, "Spike at index 2 should be interpolated to 0");
+        assert_eq!(
+            samples[2], 0,
+            "Spike at index 2 should be interpolated to 0"
+        );
         // Neighbors should be unchanged
         assert_eq!(samples[0], 0);
         assert_eq!(samples[1], 0);
@@ -402,7 +442,10 @@ mod tests {
         // A negative spike should also be removed
         let mut samples: Vec<i16> = vec![100, 100, -5000, 100, 100];
         declip(&mut samples);
-        assert_eq!(samples[2], 100, "Negative spike should be interpolated to 100");
+        assert_eq!(
+            samples[2], 100,
+            "Negative spike should be interpolated to 100"
+        );
     }
 
     #[test]
@@ -475,5 +518,59 @@ mod tests {
         apply_gain(&mut samples, -20.0);
         assert_eq!(samples[0], 1000);
         assert_eq!(samples[1], -1000);
+    }
+
+    // --- AdpcmDecoder struct tests ---
+
+    #[test]
+    fn test_decoder_reset() {
+        let mut dec = AdpcmDecoder::new();
+        dec.reset(1000, 40);
+        assert_eq!(dec.predictor, 1000);
+        assert_eq!(dec.step_index, 40);
+    }
+
+    #[test]
+    fn test_decoder_step_index_clamped() {
+        let mut dec = AdpcmDecoder::new();
+        dec.reset(0, 100); // 100 > 88, should clamp
+        assert_eq!(dec.step_index, 88);
+    }
+
+    #[test]
+    fn test_decode_bytes_produces_two_samples_per_byte() {
+        let mut dec = AdpcmDecoder::new();
+        dec.reset(0, 0);
+        let samples = dec.decode_bytes(&[0x00]);
+        assert_eq!(samples.len(), 2); // high nibble + low nibble
+    }
+
+    #[test]
+    fn test_decode_bytes_matches_decode_frame() {
+        // Use the existing test_known_vector frame.
+        let mut frame = [0u8; FRAME_SIZE];
+        frame[0] = 0x00;
+        frame[1] = 0x07;
+        frame[2] = 0x00;
+        let pred_bytes = (1000i16).to_be_bytes();
+        frame[3] = pred_bytes[0];
+        frame[4] = pred_bytes[1];
+        frame[5] = 20;
+        frame[6] = 0x35;
+        frame[7] = 0x90;
+        // rest is zeros
+
+        let (_seq_old, samples_old) = decode_frame(&frame);
+
+        let mut dec = AdpcmDecoder::new();
+        let predictor = i16::from_be_bytes([frame[3], frame[4]]);
+        let step_index = frame[5];
+        dec.reset(predictor, step_index);
+        let samples_new = dec.decode_bytes(&frame[6..]);
+        // First sample is the predictor itself
+        let mut full = vec![predictor];
+        full.extend_from_slice(&samples_new);
+
+        assert_eq!(samples_old.as_slice(), full.as_slice());
     }
 }

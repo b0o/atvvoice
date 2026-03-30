@@ -3,9 +3,17 @@ pub mod atvv;
 pub mod ble;
 #[cfg(feature = "dbus")]
 pub mod dbus;
+pub mod protocol;
 pub mod pw;
 
 use clap::Parser;
+use std::time::Duration;
+
+/// Delay between retries when resolving characteristics or polling for connection.
+const RETRY_DELAY: Duration = Duration::from_secs(2);
+
+/// Delay between retries when discovering ATVV devices.
+const DISCOVERY_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Parser)]
 #[command(name = "atvvoice", about = "ATVVoice - BLE voice remote microphone daemon")]
@@ -91,7 +99,7 @@ async fn ensure_connected(device: &bluer::Device) {
     }
     // Fallback: poll
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(RETRY_DELAY).await;
         if device.is_connected().await.unwrap_or(false) {
             return;
         }
@@ -153,11 +161,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         keepalive: std::time::Duration::from_secs(cli.keep_alive),
     };
 
-    let protocol_version_override = cli
-        .protocol_version
-        .as_deref()
-        .map(atvv::parse_protocol_version)
-        .transpose()?;
+    let protocol_version = match cli.protocol_version.as_deref() {
+        Some(s) => protocol::types::ProtocolVersion::parse(s)
+            .map_err(|e| anyhow::anyhow!(e))?,
+        None => protocol::types::ProtocolVersion::V0_4,
+    };
 
     // Addresses to skip during auto-discovery (locked by another instance).
     let mut excluded_addrs: Vec<bluer::Address> = Vec::new();
@@ -172,7 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(device) => break device,
                         Err(e) => {
                             tracing::info!("No ATVV device found ({e}), retrying in 5s...");
-                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            tokio::time::sleep(DISCOVERY_RETRY_DELAY).await;
                         }
                     }
                 }
@@ -204,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             tracing::warn!(
                                 "Failed to resolve characteristics ({e}), retrying in 2s..."
                             );
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            tokio::time::sleep(RETRY_DELAY).await;
                         }
                     }
                 }
@@ -274,7 +282,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Inner loop: session → reconnect (same device).
         loop {
-            let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
+            let mut session_protocol = protocol::create_protocol(protocol_version);
+
+            let (frame_tx, mut frame_rx) =
+                tokio::sync::mpsc::channel::<protocol::types::AudioFrame>(64);
             let (pcm_tx, pcm_rx) = std::sync::mpsc::channel::<Vec<i16>>();
             let (pw_shutdown_tx, pw_shutdown_rx) =
                 pipewire::channel::channel::<pw::Shutdown>();
@@ -289,15 +300,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
 
+            // Post-processing task: Protocol already decoded the audio,
+            // so we just apply declip/lowpass/gain and forward PCM.
             let decoder_handle = tokio::spawn(async move {
-                while let Some(frame_data) = frame_rx.recv().await {
-                    if frame_data.len() == adpcm::FRAME_SIZE {
-                        let frame: [u8; 134] = frame_data.try_into().unwrap();
-                        let (_seq, mut samples) = adpcm::decode_frame(&frame);
-                        adpcm::declip(&mut samples);
-                        adpcm::lowpass(&mut samples);
-                        let _ = pcm_tx.send(samples.to_vec());
-                    }
+                while let Some(frame) = frame_rx.recv().await {
+                    let mut samples = frame.samples;
+                    adpcm::declip(&mut samples);
+                    adpcm::lowpass(&mut samples);
+                    let _ = pcm_tx.send(samples);
                 }
             });
 
@@ -308,6 +318,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let session_result = tokio::select! {
                 result = atvv::run_session(
                     &ble_device,
+                    &mut *session_protocol,
                     frame_tx,
                     cli.mode,
                     &timeouts,
@@ -318,10 +329,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         { None }
                     },
                     Some(&state_tx),
-                    protocol_version_override,
                 ) => result,
                 _ = &mut ctrl_c => {
-                    let _ = chars.tx.write(atvv::CMD_MIC_CLOSE).await;
+                    let mic_close = session_protocol.mic_close_cmd(
+                        protocol::types::StreamId::ANY,
+                    );
+                    let _ = chars.tx.write(&mic_close).await;
                     tracing::info!("Sent MIC_CLOSE, shutting down");
                     let _ = pw_shutdown_tx.send(pw::Shutdown);
                     break 'discover;
@@ -374,7 +387,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tracing::warn!(
                             "Failed to re-resolve characteristics ({e}), retrying in 2s..."
                         );
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        tokio::time::sleep(RETRY_DELAY).await;
                     }
                 }
             };

@@ -10,6 +10,9 @@ use zbus::interface;
 
 use crate::atvv::{ExternalCommand, State};
 
+/// D-Bus object path for the daemon interface.
+const DBUS_OBJECT_PATH: &str = "/org/atvvoice/Daemon";
+
 /// Static info about the daemon, set at startup.
 #[derive(Clone)]
 pub struct DaemonInfo {
@@ -70,7 +73,7 @@ impl DaemonInterface {
     /// Current state: "init", "ready", "opening", "streaming".
     #[zbus(property)]
     async fn state(&self) -> String {
-        state_to_str(*self.state_rx.borrow()).to_string()
+        self.state_rx.borrow().to_string()
     }
 
     /// Bluetooth address of the connected remote.
@@ -93,15 +96,6 @@ impl DaemonInterface {
     ) -> zbus::Result<()>;
 }
 
-fn state_to_str(s: State) -> &'static str {
-    match s {
-        State::Init => "init",
-        State::Ready => "ready",
-        State::Opening => "opening",
-        State::Streaming => "streaming",
-    }
-}
-
 /// Spawn the D-Bus service on the session bus.
 /// Returns the command receiver for the ATVV session to consume.
 pub async fn serve(
@@ -114,7 +108,7 @@ pub async fn serve(
 
     let connection = zbus::connection::Builder::session()?
         .name(bus_name)?
-        .serve_at("/org/atvvoice/Daemon", iface)?
+        .serve_at(DBUS_OBJECT_PATH, iface)?
         .build()
         .await?;
 
@@ -129,12 +123,13 @@ pub async fn serve(
                 prev_state = new_state;
                 let object_server = conn.object_server();
                 if let Ok(iface_ref) = object_server
-                    .interface::<_, DaemonInterface>("/org/atvvoice/Daemon")
+                    .interface::<_, DaemonInterface>(DBUS_OBJECT_PATH)
                     .await
                 {
+                    let state_str = new_state.to_string();
                     let _ = DaemonInterface::mic_state_changed(
                         iface_ref.signal_emitter(),
-                        state_to_str(new_state),
+                        &state_str,
                     )
                     .await;
                 }

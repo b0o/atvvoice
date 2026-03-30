@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use bluer::{gatt::remote::Characteristic, Adapter, AdapterEvent, Address, Device, Uuid};
 use futures::{Stream, StreamExt};
 
-use crate::atvv::{BleDevice, DeviceConnectionEvent};
+use crate::atvv::{BleDevice, BleFut, BleStream, DeviceConnectionEvent};
 
 /// Wrap a `CharacteristicReader` (from `AcquireNotify`) into a `Stream<Item = Vec<u8>>`.
 fn reader_to_stream(
@@ -46,10 +46,7 @@ pub struct BluerDevice<'a> {
 }
 
 impl BleDevice for BluerDevice<'_> {
-    fn write_command(
-        &self,
-        data: &[u8],
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + '_>> {
+    fn write_command(&self, data: &[u8]) -> BleFut<'_, ()> {
         let data = data.to_vec();
         Box::pin(async move {
             self.chars.tx.write(&data).await?;
@@ -57,16 +54,7 @@ impl BleDevice for BluerDevice<'_> {
         })
     }
 
-    fn ctl_notifications(
-        &self,
-    ) -> Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>>,
-                > + Send
-                + '_,
-        >,
-    > {
+    fn ctl_notifications(&self) -> BleFut<'_, BleStream<Vec<u8>>> {
         Box::pin(async {
             let reader = self.chars.ctl.notify_io().await
                 .context("Failed to acquire exclusive CTL notifications. \
@@ -76,16 +64,7 @@ impl BleDevice for BluerDevice<'_> {
         })
     }
 
-    fn rx_notifications(
-        &self,
-    ) -> Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>>,
-                > + Send
-                + '_,
-        >,
-    > {
+    fn rx_notifications(&self) -> BleFut<'_, BleStream<Vec<u8>>> {
         Box::pin(async {
             let reader = self.chars.rx.notify_io().await
                 .context("Failed to acquire exclusive RX notifications. \
@@ -95,18 +74,7 @@ impl BleDevice for BluerDevice<'_> {
         })
     }
 
-    fn connection_events(
-        &self,
-    ) -> Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = Result<
-                        Pin<Box<dyn Stream<Item = DeviceConnectionEvent> + Send>>,
-                    >,
-                > + Send
-                + '_,
-        >,
-    > {
+    fn connection_events(&self) -> BleFut<'_, BleStream<DeviceConnectionEvent>> {
         Box::pin(async {
             let stream = self.device.events().await?;
             let mapped = stream.filter_map(|event| async move {
@@ -120,8 +88,7 @@ impl BleDevice for BluerDevice<'_> {
                 }
             });
             Ok(
-                Box::pin(mapped)
-                    as Pin<Box<dyn Stream<Item = DeviceConnectionEvent> + Send>>,
+                Box::pin(mapped) as BleStream<DeviceConnectionEvent>,
             )
         })
     }
